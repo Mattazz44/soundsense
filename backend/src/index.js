@@ -20,10 +20,20 @@ const allowedOrigins = (process.env.FRONTEND_URL ?? 'http://localhost:5173')
   .map((origin) => origin.trim())
   .filter(Boolean);
 
+function isAllowedOrigin(origin) {
+  if (!origin || allowedOrigins.includes(origin)) {
+    return true;
+  }
+  if (process.env.NODE_ENV !== 'production') {
+    return /^https?:\/\/(?:localhost|127\.0\.0\.1):\d+$/.test(origin);
+  }
+  return false;
+}
+
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (isAllowedOrigin(origin)) {
         return callback(null, true);
       }
       return callback(new AppError(403, 'CORS_BLOCKED', 'Origin tidak diizinkan oleh CORS.'));
