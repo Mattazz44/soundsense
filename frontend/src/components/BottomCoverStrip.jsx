@@ -32,6 +32,7 @@ export function BottomCoverStrip({
   const canPlayActive = Boolean(activeTrack?.previewUrl);
   const safeDuration = duration > 0 ? duration : 30;
   const clampedTime = Math.min(currentTime, safeDuration);
+  const visibleSourceStrip = sourceTracks.slice(0, 30);
 
   function renderThumbnail(track, groupLabel, index) {
     const isSelected = track._stageKey === selectedKey;
@@ -62,7 +63,7 @@ export function BottomCoverStrip({
             className="w-full h-full object-cover block"
           />
         ) : (
-          <span className="w-full h-full bg-[#EFE9E5] text-[#181818] font-mono text-[10px] flex items-center justify-center p-1 text-center leading-tight">
+          <span className="w-full h-full bg-[#EFE9E5] text-[#181818] text-[10px] font-medium flex items-center justify-center p-1 text-center leading-tight">
             {track.title.slice(0, 10)}
           </span>
         )}
@@ -77,19 +78,19 @@ export function BottomCoverStrip({
   }
 
   return (
-    <footer className="w-full border-t border-[#181818]/10 bg-[#F6F3F0]">
+    <footer className="w-full border-t border-[#181818]/10 bg-white/80 backdrop-blur-sm">
       {isFullTrackMode && activeTrack?.id && (
         <div className="border-b border-[#181818]/10 bg-[#EFE9E5]">
           <div className="max-w-[1400px] mx-auto px-5 sm:px-8 lg:px-12 py-3 space-y-2">
             <div className="flex items-center justify-between gap-3">
-              <p className="font-mono text-xs text-[#181818] truncate">
+              <p className="text-xs font-medium text-[#181818] truncate">
                 Spotify Full Track Player · {activeTrack.title} ({activeTrack.artist})
               </p>
               <button
                 type="button"
                 onClick={onToggleFullTrack}
                 aria-label="Tutup Spotify Full Track Player"
-                className="min-h-[44px] px-3 inline-flex items-center gap-1.5 font-mono text-xs text-[#181818] hover:text-[#9E472A]"
+                className="min-h-[44px] px-3 inline-flex items-center gap-1.5 text-xs font-medium text-[#181818] hover:text-[#9E472A]"
               >
                 <CloseGlyph className="w-3.5 h-3.5" />
                 <span>Tutup</span>
@@ -157,7 +158,7 @@ export function BottomCoverStrip({
               <p className="text-xs font-semibold text-[#181818] truncate">
                 {activeTrack?.title || 'Pilih lagu'}
               </p>
-              <p className="font-mono text-[11px] text-[#6E6A66] truncate">
+              <p className="text-[11px] text-[#6E6A66] truncate">
                 {canPlayActive ? activeTrack?.artist : 'Tanpa preview 30s'}
               </p>
             </div>
@@ -203,7 +204,7 @@ export function BottomCoverStrip({
                 type="button"
                 aria-pressed={isFullTrackMode}
                 onClick={onToggleFullTrack}
-                className={`min-h-[44px] px-3.5 border font-mono text-xs transition-colors ${
+                className={`min-h-[44px] px-3.5 border text-xs font-medium transition-colors ${
                   isFullTrackMode
                     ? 'bg-[#9E472A] text-[#F6F3F0] border-[#9E472A]'
                     : 'bg-transparent text-[#181818] border-[#8A837C] hover:border-[#181818] hover:bg-[#EFE9E5]'
@@ -219,7 +220,7 @@ export function BottomCoverStrip({
           aria-label="Navigasi cepat sampul album"
           className="pt-2 border-t border-[#181818]/8 flex items-center gap-3 overflow-x-auto editorial-scroll py-1"
         >
-          <span className="font-mono text-[11px] uppercase tracking-[0.06em] text-[#6E6A66] shrink-0">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.04em] text-[#6E6A66] shrink-0">
             Rekomendasi
           </span>
           <div className="flex items-center gap-2 shrink-0">
@@ -228,17 +229,17 @@ export function BottomCoverStrip({
             )}
           </div>
 
-          {sourceTracks.length > 0 && (
+          {visibleSourceStrip.length > 0 && (
             <>
               <div
                 aria-hidden="true"
                 className="h-9 w-px bg-[#181818]/15 mx-1.5 shrink-0"
               />
-              <span className="font-mono text-[11px] uppercase tracking-[0.06em] text-[#6E6A66] shrink-0">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.04em] text-[#6E6A66] shrink-0">
                 Playlist Asal
               </span>
               <div className="flex items-center gap-2 shrink-0">
-                {sourceTracks.map((track, idx) =>
+                {visibleSourceStrip.map((track, idx) =>
                   renderThumbnail(track, 'Playlist Asal', idx)
                 )}
               </div>

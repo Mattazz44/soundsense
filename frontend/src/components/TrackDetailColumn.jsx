@@ -22,6 +22,7 @@ export function TrackDetailColumn({
   trackContext,
   playlistInfo,
   vibeAnalysis,
+  audioProfile,
   isPlaying,
   audioCurrentTime,
   audioDuration,
@@ -149,37 +150,27 @@ export function TrackDetailColumn({
   }
 
   const isOutlier = Boolean(trackContext?.outlierInfo);
+  const outlierInfo = trackContext?.outlierInfo;
   const displayReason = isOutlier
-    ? trackContext.outlierInfo.reason
+    ? outlierInfo.reason
     : track.reason ||
       `Lagu ini selaras dengan karakter ${vibeAnalysis.mood} pada playlist "${playlistInfo.name}".`;
 
   const reasonLines = splitEditorialLines(displayReason);
-  const metadataParts = [
-    track.artist,
-    track.releaseYear ? String(track.releaseYear) : null,
-    formatDuration(track.durationMs),
-  ].filter(Boolean);
+  const centroid = audioProfile?.centroid;
+  const trackAudio = track.audioFeatures || outlierInfo?.audioFeatures;
+  const matchPct = track.matchScore ?? track.similarityScore ?? null;
 
-  let captionLabel = `LAGU PLAYLIST ASAL · TRACK ${String(trackContext?.index ?? 1).padStart(2, '0')}`;
+  let captionLabel = `Lagu Playlist Asal · Track ${String(trackContext?.index ?? 1).padStart(2, '0')}`;
   if (trackContext?.kind === 'recommendation') {
-    captionLabel = `CATATAN KURASI · REKOMENDASI ${String(trackContext.index).padStart(2, '0')}`;
+    captionLabel = `Catatan Kurasi · Rekomendasi ${String(trackContext.index).padStart(2, '0')}`;
   } else if (isOutlier) {
-    captionLabel = `DETEKSI KURANG COCOK · TRACK ${String(trackContext.outlierInfo.trackNumber).padStart(2, '0')}`;
+    captionLabel = `Analisis Ketidaksesuaian · Track ${String(outlierInfo.trackNumber).padStart(2, '0')}`;
   }
 
   return (
     <div key={track._stageKey} className="stage-enter space-y-5 min-w-0">
       <div className="space-y-2.5">
-        {isOutlier && (
-          <div className="inline-flex items-center gap-2 text-xs font-mono text-[#9E472A]">
-            <AlertMarkIcon className="w-4 h-4 shrink-0" />
-            <span>
-              Kurang selaras dengan playlist (skor ketidaksesuaian {trackContext.outlierInfo.mismatchScore}%)
-            </span>
-          </div>
-        )}
-
         <div className="flex items-center gap-3 min-w-0">
           <h2 className="font-sans font-bold text-[clamp(1.75rem,2.75vw,2.45rem)] leading-[1.08] tracking-[-0.025em] text-[#181818] break-words min-w-0">
             {track.title}
@@ -187,10 +178,88 @@ export function TrackDetailColumn({
           {isPlaying && <EqualizerBars className="w-4 h-5 shrink-0" />}
         </div>
 
-        <p className="font-mono text-xs sm:text-[13px] text-[#6E6A66] leading-relaxed">
-          {metadataParts.join(' · ')}
+        <p className="text-sm text-[#6E6A66] leading-relaxed flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="font-medium text-[#181818]">{track.artist}</span>
+          {track.releaseYear && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="font-mono text-xs tabular-nums">{track.releaseYear}</span>
+            </>
+          )}
+          {track.durationMs && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="font-mono text-xs tabular-nums">{formatDuration(track.durationMs)}</span>
+            </>
+          )}
+          {trackAudio?.tempo && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="font-mono text-xs tabular-nums">{Math.round(trackAudio.tempo)} BPM</span>
+            </>
+          )}
+          {!isOutlier && matchPct !== null && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="text-xs font-medium text-[#9E472A]">
+                <span className="font-mono tabular-nums">{matchPct}%</span> cocok
+              </span>
+            </>
+          )}
         </p>
+
+        {(track.subGenre || track.language) && (
+          <div className="flex flex-wrap items-center gap-2 pt-0.5">
+            {track.subGenre && (
+              <span className="px-2.5 py-0.5 bg-[#EFE9E5] border border-[#181818]/12 text-[11px] font-medium text-[#181818]">
+                {track.subGenre}
+              </span>
+            )}
+            {track.language && (
+              <span className="text-[11px] font-medium text-[#5E5A56]">
+                {track.language === 'id' ? 'Indonesia' : 'Inggris / Internasional'}
+              </span>
+            )}
+          </div>
+        )}
       </div>
+
+      {isOutlier && (
+        <div className="p-4 bg-white/80 backdrop-blur-sm border border-[#9E472A] space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="inline-flex items-center gap-2 text-xs font-semibold text-[#9E472A]">
+              <AlertMarkIcon className="w-4 h-4 shrink-0" />
+              <span>Terdeteksi Keluar Jalur</span>
+            </div>
+            <span className="font-mono text-xs tabular-nums text-[#181818] font-medium">
+              Ketidaksesuaian {outlierInfo.mismatchScore}%
+            </span>
+          </div>
+
+          {outlierInfo.subGenre && (
+            <p className="text-xs text-[#5E5A56]">
+              Sub-genre lagu: <span className="font-medium text-[#181818]">{outlierInfo.subGenre}</span>
+            </p>
+          )}
+
+          {trackAudio && centroid && (
+            <div className="grid grid-cols-2 gap-3 pt-1 text-xs border-t border-[#181818]/10">
+              <div>
+                <p className="text-[#5E5A56]">Lagu ini</p>
+                <p className="font-mono tabular-nums text-[#181818] font-medium">
+                  {Math.round(trackAudio.tempo)} BPM · Energi {Math.round(trackAudio.energy * 100)}%
+                </p>
+              </div>
+              <div>
+                <p className="text-[#5E5A56]">Inti playlist</p>
+                <p className="font-mono tabular-nums text-[#181818] font-medium">
+                  {Math.round(centroid.tempo)} BPM · Energi {Math.round(centroid.energy * 100)}%
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2.5">
         {track.spotifyUrl ? (
@@ -220,7 +289,7 @@ export function TrackDetailColumn({
                 ? 'Jeda preview audio 30 detik'
                 : 'Putar preview audio 30 detik'
           }
-          className={`min-h-[44px] px-3.5 border text-xs font-mono inline-flex items-center gap-2 transition-colors ${
+          className={`min-h-[44px] px-3.5 border text-xs font-medium inline-flex items-center gap-2 transition-colors ${
             track.previewUrl
               ? isPlaying
                 ? 'bg-[#181818] text-[#F6F3F0] border-[#181818]'
@@ -243,7 +312,7 @@ export function TrackDetailColumn({
             type="button"
             aria-pressed={isFullTrackMode}
             onClick={onToggleFullTrack}
-            className={`min-h-[44px] px-3.5 border text-xs font-mono inline-flex items-center transition-colors ${
+            className={`min-h-[44px] px-3.5 border text-xs font-medium inline-flex items-center transition-colors ${
               isFullTrackMode
                 ? 'bg-[#9E472A] text-[#F6F3F0] border-[#9E472A]'
                 : 'bg-transparent text-[#181818] border-[#8A837C] hover:border-[#181818] hover:bg-[#EFE9E5]'
@@ -255,7 +324,7 @@ export function TrackDetailColumn({
       </div>
 
       {audioError && (
-        <p role="status" className="text-xs font-mono text-[#9E472A]">
+        <p role="status" className="text-xs font-medium text-[#9E472A]">
           {audioError}
         </p>
       )}
@@ -266,9 +335,9 @@ export function TrackDetailColumn({
           role="tab"
           aria-selected={detailTab === 'notes'}
           onClick={() => setDetailTab('notes')}
-          className={`min-h-[44px] px-1 text-xs font-mono border-b-2 transition-colors ${
+          className={`min-h-[44px] px-1 text-xs font-semibold border-b-2 transition-colors ${
             detailTab === 'notes'
-              ? 'border-[#9E472A] text-[#181818] font-medium'
+              ? 'border-[#9E472A] text-[#181818]'
               : 'border-transparent text-[#6E6A66] hover:text-[#181818]'
           }`}
         >
@@ -280,9 +349,9 @@ export function TrackDetailColumn({
           role="tab"
           aria-selected={detailTab === 'lyrics'}
           onClick={() => setDetailTab('lyrics')}
-          className={`min-h-[44px] px-1 text-xs font-mono border-b-2 transition-colors ${
+          className={`min-h-[44px] px-1 text-xs font-semibold border-b-2 transition-colors ${
             detailTab === 'lyrics'
-              ? 'border-[#9E472A] text-[#181818] font-medium'
+              ? 'border-[#9E472A] text-[#181818]'
               : 'border-transparent text-[#6E6A66] hover:text-[#181818]'
           }`}
         >
@@ -292,26 +361,26 @@ export function TrackDetailColumn({
 
       {detailTab === 'notes' ? (
         <div className="space-y-4">
-          <div className="space-y-1.5 text-[15px] leading-[1.72] text-[#6E6A66] max-w-[44ch]">
+          <div className="space-y-1.5 text-[15px] leading-[1.72] text-[#6E6A66] max-w-[46ch]">
             {reasonLines.map((line, idx) => (
               <p key={idx}>{line}</p>
             ))}
           </div>
 
-          <p className="font-mono text-[11px] uppercase tracking-[0.06em] text-[#181818]">
+          <p className="text-xs font-semibold uppercase tracking-[0.04em] text-[#181818]">
             {captionLabel}
           </p>
         </div>
       ) : (
         <div className="space-y-2.5">
           {lyricsState.status === 'loading' ? (
-            <p role="status" className="font-mono text-xs text-[#6E6A66] py-6">
+            <p role="status" className="text-xs text-[#6E6A66] py-6">
               Mencari lirik lagu di LRCLIB...
             </p>
           ) : parsedSyncedLines.length > 0 ? (
             <>
               <div className="flex items-center justify-between gap-2">
-                <span className="font-mono text-[11px] text-[#6E6A66]">
+                <span className="text-xs text-[#6E6A66]">
                   Lirik tersinkron ({isPlaying ? 'mengikuti audio preview' : 'putar preview untuk sinkronisasi'})
                 </span>
               </div>
@@ -366,10 +435,10 @@ export function TrackDetailColumn({
           aria-expanded={isSummaryOpen}
           aria-controls="vibe-summary-card"
           onClick={() => setIsSummaryOpen((prev) => !prev)}
-          className="min-h-[44px] inline-flex items-center gap-2 font-mono text-xs text-[#181818] hover:text-[#9E472A] transition-colors"
+          className="min-h-[44px] inline-flex items-center gap-2 text-xs font-medium text-[#181818] hover:text-[#9E472A] transition-colors"
         >
           <span className="underline underline-offset-4">
-            Ringkasan vibe playlist: {playlistInfo.name}
+            Detail karakter playlist: {playlistInfo.name}
           </span>
         </button>
 
@@ -382,7 +451,7 @@ export function TrackDetailColumn({
           >
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="font-mono text-[11px] uppercase tracking-[0.06em] text-[#9E472A]">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.04em] text-[#9E472A]">
                   {vibeAnalysis.mood}
                 </p>
                 <p className="font-sans font-semibold text-sm text-[#181818] mt-0.5">
@@ -405,7 +474,7 @@ export function TrackDetailColumn({
             </p>
 
             {vibeAnalysis.genres?.length > 0 && (
-              <p className="font-mono text-xs text-[#5E5A56]">
+              <p className="text-xs text-[#5E5A56]">
                 Genre dominan: {vibeAnalysis.genres.join(' · ')}
               </p>
             )}

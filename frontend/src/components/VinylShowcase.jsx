@@ -7,12 +7,12 @@ export function VinylShowcase({ track, isPlaying }) {
     <div className="w-full flex justify-center lg:justify-start pr-8 sm:pr-12 lg:pr-14">
       <div
         key={track?._stageKey || 'empty-vinyl'}
-        className="stage-enter relative w-[220px] sm:w-[270px] xl:w-[310px] aspect-square shrink-0"
+        className="stage-enter group relative w-[220px] sm:w-[270px] xl:w-[310px] aspect-square shrink-0"
       >
         <div
           aria-hidden="true"
-          className={`vinyl-disc absolute top-1/2 -translate-y-1/2 right-[-28%] w-[90%] aspect-square rounded-full overflow-hidden ${
-            isPlaying ? 'vinyl-spin-active' : 'vinyl-spin-paused'
+          className={`vinyl-disc absolute top-1/2 -translate-y-1/2 right-[-28%] w-[90%] aspect-square rounded-full overflow-hidden transition-transform duration-500 ease-out group-hover:translate-x-2.5 ${
+            isPlaying ? 'vinyl-spin-active' : 'vinyl-spin-idle'
           }`}
         >
           <div className="vinyl-sheen w-full h-full rounded-full" />
@@ -30,14 +30,14 @@ export function VinylShowcase({ track, isPlaying }) {
             />
           ) : (
             <div className="w-full h-full p-6 flex flex-col justify-between bg-[#EFE9E5] text-[#181818]">
-              <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-[#5E5A56]">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.04em] text-[#5E5A56]">
                 Tanpa Gambar Sampul
               </span>
               <div>
                 <p className="font-sans font-bold text-lg leading-tight line-clamp-2">
                   {track?.title || 'Track'}
                 </p>
-                <p className="font-mono text-xs text-[#5E5A56] mt-1">
+                <p className="text-xs text-[#5E5A56] mt-1">
                   {track?.artist || ''}
                 </p>
               </div>

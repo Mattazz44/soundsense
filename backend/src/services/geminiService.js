@@ -129,23 +129,54 @@ const recommendationResponseSchema = {
       properties: {
         mood: {
           type: Type.STRING,
-          description: 'Short 2 to 4 word mood label, e.g. Warm Melancholic Indie',
+          description: 'Short 2 to 4 word mood label, e.g. Hazy Shoegaze Reverie',
+        },
+        dominantSubGenres: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+          description:
+            '3 to 6 specific dominant micro-genres detected in the playlist, e.g. indonesian shoegaze, shoegaze, dream pop, nu gaze, indonesian indie',
         },
         genres: {
           type: Type.ARRAY,
           items: { type: Type.STRING },
-          description: 'Up to 4 dominant genres detected in the playlist',
+          description: 'Up to 4 concise genres detected in the playlist',
         },
         summary: {
           type: Type.STRING,
           description:
-            '2 to 3 complete sentences in natural Indonesian describing the musical mood, tempo, instrumentation, and atmosphere of the playlist. Never truncate.',
+            '2 to 3 complete sentences in natural Indonesian describing the musical mood, micro-genre texture, tempo, instrumentation, and atmosphere of the playlist. Never truncate.',
         },
       },
-      required: ['mood', 'genres', 'summary'],
+      required: ['mood', 'dominantSubGenres', 'genres', 'summary'],
     },
-    recommendations: {
+    sourceTrackClassifications: {
       type: Type.ARRAY,
+      description:
+        'Concise micro-genre and language tag for each analyzed track in the source playlist.',
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          trackNumber: {
+            type: Type.INTEGER,
+            description: '1-based index of the source track',
+          },
+          subGenre: {
+            type: Type.STRING,
+            description: 'Concise 1 to 3 word micro-genre tag, e.g. shoegaze or dream pop',
+          },
+          language: {
+            type: Type.STRING,
+            description: 'Exact code: "id" for Indonesian or "en" for English/International',
+          },
+        },
+        required: ['trackNumber', 'subGenre', 'language'],
+      },
+    },
+    recommendationsIndonesia: {
+      type: Type.ARRAY,
+      description:
+        'Curated Indonesian songs strictly belonging to the playlist dominant micro-genres.',
       items: {
         type: Type.OBJECT,
         properties: {
@@ -157,19 +188,51 @@ const recommendationResponseSchema = {
             type: Type.STRING,
             description: 'Primary artist name',
           },
+          subGenre: {
+            type: Type.STRING,
+            description: 'Specific micro-genre label of this track, e.g. Indonesian Shoegaze',
+          },
           reason: {
             type: Type.STRING,
             description:
-              '1 to 2 poetic yet specific sentences in natural Indonesian explaining why this song fits the playlist',
+              '1 to 2 specific sentences in natural Indonesian explaining why this song fits the playlist micro-genre, danceability, and core tracks',
           },
         },
-        required: ['title', 'artist', 'reason'],
+        required: ['title', 'artist', 'subGenre', 'reason'],
+      },
+    },
+    recommendationsInternasional: {
+      type: Type.ARRAY,
+      description:
+        'Curated English or international songs strictly belonging to the playlist dominant micro-genres.',
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          title: {
+            type: Type.STRING,
+            description: 'Exact song title available on Spotify',
+          },
+          artist: {
+            type: Type.STRING,
+            description: 'Primary artist name',
+          },
+          subGenre: {
+            type: Type.STRING,
+            description: 'Specific micro-genre label of this track, e.g. Dream Pop or Nu Gaze',
+          },
+          reason: {
+            type: Type.STRING,
+            description:
+              '1 to 2 specific sentences in natural Indonesian explaining why this song fits the playlist micro-genre, danceability, and core tracks',
+          },
+        },
+        required: ['title', 'artist', 'subGenre', 'reason'],
       },
     },
     outliers: {
       type: Type.ARRAY,
       description:
-        'Songs from the source playlist that clash with or diverge from its dominant mood, genre, tempo, or era. Return an empty array if the playlist is cohesive.',
+        'Tracks that diverge in audio profile or micro-genre from the playlist core. Empty array if cohesive.',
       items: {
         type: Type.OBJECT,
         properties: {
@@ -185,6 +248,10 @@ const recommendationResponseSchema = {
             type: Type.STRING,
             description: 'Artist name from the provided source playlist list',
           },
+          subGenre: {
+            type: Type.STRING,
+            description: 'Micro-genre of the outlier track explaining the contrast',
+          },
           mismatchScore: {
             type: Type.INTEGER,
             description: 'Mismatch severity from 1 (mild deviation) to 100 (strong clash)',
@@ -192,14 +259,20 @@ const recommendationResponseSchema = {
           reason: {
             type: Type.STRING,
             description:
-              '1 to 2 clear sentences in natural Indonesian explaining why this song feels out of place compared to the dominant playlist vibe',
+              '1 to 2 specific sentences in natural Indonesian citing concrete musical differences (sub-genre, tempo, danceability, energy, or acousticness) against the playlist core',
           },
         },
-        required: ['trackNumber', 'title', 'artist', 'mismatchScore', 'reason'],
+        required: ['trackNumber', 'title', 'artist', 'subGenre', 'mismatchScore', 'reason'],
       },
     },
   },
-  required: ['vibeAnalysis', 'recommendations', 'outliers'],
+  required: [
+    'vibeAnalysis',
+    'sourceTrackClassifications',
+    'recommendationsIndonesia',
+    'recommendationsInternasional',
+    'outliers',
+  ],
 };
 
 function sanitizeCopy(text) {
@@ -208,35 +281,135 @@ function sanitizeCopy(text) {
     .trim();
 }
 
-export async function generatePlaylistRecommendations({ playlistInfo, tracks, limit }) {
+function normalizeLanguageCode(rawLang) {
+  const value = String(rawLang ?? '').trim().toLowerCase();
+  if (value === 'id' || value === 'indonesia' || value === 'indonesian') {
+    return 'id';
+  }
+  return 'en';
+}
+
+export async function generatePlaylistRecommendations({
+  playlistInfo,
+  tracks,
+  limit,
+  languageSplit = null,
+  audioProfile = null,
+  artistMetaByName = null,
+  seedCandidates = [],
+  microGenreSeeds = [],
+  statisticalOutliers = [],
+}) {
   const { ai, apiKey } = getGeminiConfig();
-  // Request a small buffer so deduplication or missed Spotify searches still yield the requested limit.
-  const candidateCount = Math.min(limit + 4, 20);
+  const indoTarget = languageSplit?.indonesia ?? Math.ceil(limit / 2);
+  const intlTarget = languageSplit?.internasional ?? Math.max(1, limit - indoTarget);
+  const indoAsk = Math.min(indoTarget + 5, 16);
+  const intlAsk = Math.min(intlTarget + 5, 16);
 
   const trackLines = tracks
-    .slice(0, 50)
+    .slice(0, 100)
     .map((track, idx) => {
       const yearPart = track.releaseYear ? ` (${track.releaseYear})` : '';
       return `${idx + 1}. ${track.title} - ${track.artist}${yearPart}`;
     })
     .join('\n');
 
+  const profileSection = audioProfile?.hasAudioProfile && audioProfile.centroid
+    ? [
+        '',
+        `Profil Audio Inti Playlist (Weighted Centroid dari ${audioProfile.sampleSize} lagu):`,
+        `- Energi: ${audioProfile.centroid.energy} (skala 0-1)`,
+        `- Suasana/Valence: ${audioProfile.centroid.valence} (skala 0-1)`,
+        `- Danceability: ${audioProfile.centroid.danceability} (skala 0-1)`,
+        `- Akustik: ${audioProfile.centroid.acousticness} (skala 0-1)`,
+        `- Instrumentalness: ${audioProfile.centroid.instrumentalness} (skala 0-1)`,
+        `- Tempo median: ${audioProfile.centroid.tempo} BPM`,
+        audioProfile.dominantArtists?.length
+          ? `- Artis paling dominan: ${audioProfile.dominantArtists
+              .map((a) => `${a.name} (${a.count}x)`)
+              .join(', ')}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join('\n')
+    : '';
+
+  const artistMetaLines = [];
+  if (artistMetaByName instanceof Map && artistMetaByName.size > 0) {
+    for (const meta of artistMetaByName.values()) {
+      const tagStr = meta.tags?.length ? meta.tags.join(', ') : 'indie';
+      const countryStr = meta.country ? ` [${meta.country}]` : '';
+      artistMetaLines.push(`- ${meta.name}${countryStr}: ${tagStr}`);
+    }
+  }
+
+  const artistMetaSection =
+    artistMetaLines.length > 0
+      ? ['', 'Referensi Sub-Genre Spesifik Artis Dominan (MusicBrainz/Spotify):', ...artistMetaLines].join(
+          '\n'
+        )
+      : '';
+
+  const combinedSeeds = [];
+  const seenSeedKeys = new Set();
+  for (const c of [...microGenreSeeds, ...seedCandidates]) {
+    const key = `${String(c.title ?? '').toLowerCase()}::${String(c.artist ?? '').toLowerCase()}`;
+    if (!c.title || !c.artist || seenSeedKeys.has(key)) continue;
+    seenSeedKeys.add(key);
+    combinedSeeds.push(c);
+  }
+
+  const seedSection =
+    combinedSeeds.length > 0
+      ? [
+          '',
+          'Kandidat lagu berbasis kecocokan fitur audio dan sub-genre inti playlist:',
+          combinedSeeds
+            .slice(0, 24)
+            .map((c, idx) => `${idx + 1}. ${c.title} - ${c.artist}${c.subGenre ? ` [${c.subGenre}]` : ''}`)
+            .join('\n'),
+        ].join('\n')
+      : '';
+
+  const outlierInstruction =
+    statisticalOutliers.length > 0
+      ? [
+          '',
+          'Lagu berikut terdeteksi secara statistik keluar jalur berdasarkan jarak fitur audio terhadap centroid playlist. Evaluasi kembali bersama ketidaksesuaian sub-genre dan jelaskan pada field "outliers" dengan angka nyata berikut:',
+          statisticalOutliers
+            .map(
+              (o) =>
+                `- Track #${o.trackNumber}: "${o.title}" oleh ${o.artist} (Tempo ${o.audioFeatures.tempo} BPM, Energi ${o.audioFeatures.energy}, Danceability ${o.audioFeatures.danceability}, Valence ${o.audioFeatures.valence}, Akustik ${o.audioFeatures.acousticness}, Kemiripan ${o.similarityScore}%)`
+            )
+            .join('\n'),
+        ].join('\n')
+      : '\nCatatan evaluasi outlier: Deteksi lagu yang keluar jalur baik secara fitur audio (tempo/danceability/energi ekstrem) maupun sub-genre yang berbenturan dengan sub-genre dominan playlist. Jika seluruh lagu selaras, kembalikan "outliers": [].';
+
   const prompt = [
-    'Kamu adalah kurator musik editorial untuk SoundSense.',
-    `Analisis karakter musikal, tempo, tekstur instrumen, dan mood dari playlist "${playlistInfo.name}" berikut:`,
+    'Kamu adalah kurator musik spesialis sub-genre (micro-genre) dan analis audio untuk SoundSense.',
+    `Analisis karakter musikal, micro-genre, bahasa lagu, dan kohesi audio dari playlist "${playlistInfo.name}" (${tracks.length} lagu):`,
     playlistInfo.description ? `Deskripsi playlist: ${playlistInfo.description}` : null,
+    profileSection,
+    artistMetaSection,
     '',
     'Daftar lagu di playlist asal:',
     trackLines,
+    seedSection,
+    outlierInstruction,
     '',
     'Tugasmu:',
-    '1. Tentukan mood utama yang ringkas (2 sampai 4 kata, contoh: "Warm Melancholic Indie" atau "Late Night Groove").',
-    '2. Identifikasi hingga 4 genre dominan.',
-    '3. Tulis ringkasan utuh sepanjang 2 sampai 3 kalimat lengkap dalam bahasa Indonesia yang menjelaskan karakter musikal, tempo, instrumen, dan suasana playlist tanpa jargon klise.',
-    `4. Rekomendasikan tepat ${candidateCount} lagu BARU yang benar-benar ada di Spotify dan TIDAK ADA di daftar playlist asal di atas. Utamakan variasi artis agar tidak mengulang artis yang sama berkali-kali.`,
-    '5. Untuk setiap lagu rekomendasi, tulis alasan ("reason") sepanjang 1 sampai 2 kalimat dalam bahasa Indonesia yang puitis namun konkret (jelaskan keterkaitan aransemen, nuansa vokal, tempo, atau suasana dengan lagu tertentu di playlist asal).',
-    '6. Evaluasi kohesi playlist asal untuk field "outliers": deteksi lagu mana dari daftar playlist asal di atas yang terasa kurang sesuai atau melenceng jauh dari mood, genre, energi, atau tempo utama playlist (maksimal 6 lagu dengan ketidaksesuaian paling jelas, urutkan dari mismatchScore tertinggi). Jika semua lagu di playlist sudah selaras, kembalikan array kosong []. Jangan pernah mengarang lagu yang tidak ada di daftar playlist asal.',
-    '7. Aturan penulisan: jangan pernah menggunakan karakter em dash (--) dalam teks mana pun; gunakan koma, titik, atau titik dua sebagai gantinya.',
+    '1. Tentukan mood utama yang ringkas (2 sampai 4 kata, contoh: "Hazy Shoegaze Reverie" atau "Melancholic Dream Pop").',
+    '2. Tentukan 3 sampai 6 "dominantSubGenres" spesifik (contoh: "indonesian shoegaze", "shoegaze", "dream pop", "nu gaze", "indonesian indie") serta maksimal 4 label genre ringkas.',
+    '3. Tulis ringkasan utuh sepanjang 2 sampai 3 kalimat lengkap dalam bahasa Indonesia yang menjelaskan karakter sub-genre, tekstur instrumen, tempo, dan suasana playlist.',
+    '4. Isi "sourceTrackClassifications" untuk setiap lagu playlist asal (nomor urut, label subGenre singkat 1-3 kata, dan language "id" untuk lagu Indonesia atau "en" untuk Inggris/Internasional).',
+    `5. REKOMENDASI TERPISAH BERDASARKAN BAHASA (ANTI-NYASAR):`,
+    `   - "recommendationsIndonesia": rekomendasikan tepat ${indoAsk} lagu BERBAHASA INDONESIA yang nyata di Spotify dan berada tepat pada garis keturunan micro-genre dominan playlist.`,
+    `   - "recommendationsInternasional": rekomendasikan tepat ${intlAsk} lagu BERBAHASA INGGRIS / INTERNASIONAL yang nyata di Spotify dan berada tepat pada garis keturunan micro-genre dominan playlist.`,
+    '   - ATURAN KETAT SUB-GENRE & DANCEABILITY: Jangan pernah merekomendasikan lagu pop/rock/dance-pop generik yang keluar dari micro-genre inti hanya karena skor BPM atau energinya mirip (misal: jika playlist dominan shoegaze atau dream pop yang dreamy dan distorsi reverb, JANGAN merekomendasikan band pop-punk/alt-rock seperti Weezer atau lagu danceable yang melenceng jauh dari profil danceability playlist).',
+    '   - Tidak boleh ada lagu yang sudah terdapat di daftar playlist asal, dan jangan mengulang artis yang sama berkali-kali.',
+    '   - Untuk setiap lagu rekomendasi, tulis "subGenre" spesifik dan "reason" sepanjang 1 sampai 2 kalimat bahasa Indonesia yang menyebut alasan musikal dan kecocokannya dengan lagu/artis inti playlist.',
+    '6. Untuk field "outliers": gabungkan temuan statistik fitur audio di atas dengan ketidaksesuaian sub-genre yang mencolok di daftar lagu asal (jika ada), sebutkan subGenre serta alasan konkretnya.',
+    '7. Aturan penulisan: jangan pernah menggunakan karakter em dash (--) di teks mana pun; gunakan koma, titik, atau titik dua.',
   ]
     .filter(Boolean)
     .join('\n');
@@ -248,8 +421,8 @@ export async function generatePlaylistRecommendations({ playlistInfo, tracks, li
       apiKey,
       contents: prompt,
       config: {
-        temperature: 0.7,
-        maxOutputTokens: 2048,
+        temperature: 0.5,
+        maxOutputTokens: 8192,
         responseMimeType: 'application/json',
         responseSchema: recommendationResponseSchema,
       },
@@ -273,11 +446,14 @@ export async function generatePlaylistRecommendations({ playlistInfo, tracks, li
     );
   }
 
-  if (
-    !parsed?.vibeAnalysis ||
-    !Array.isArray(parsed?.recommendations) ||
-    parsed.recommendations.length === 0
-  ) {
+  const rawIndoRecs = Array.isArray(parsed?.recommendationsIndonesia)
+    ? parsed.recommendationsIndonesia
+    : [];
+  const rawIntlRecs = Array.isArray(parsed?.recommendationsInternasional)
+    ? parsed.recommendationsInternasional
+    : [];
+
+  if (!parsed?.vibeAnalysis || (rawIndoRecs.length === 0 && rawIntlRecs.length === 0)) {
     throw new AppError(
       502,
       'GEMINI_EMPTY_RESPONSE',
@@ -285,30 +461,57 @@ export async function generatePlaylistRecommendations({ playlistInfo, tracks, li
     );
   }
 
-  const rawOutliers = Array.isArray(parsed.outliers) ? parsed.outliers : [];
+  const dominantSubGenres = Array.isArray(parsed.vibeAnalysis.dominantSubGenres)
+    ? parsed.vibeAnalysis.dominantSubGenres.map(sanitizeCopy).filter(Boolean).slice(0, 6)
+    : [];
 
-  return {
-    vibeAnalysis: {
-      mood: sanitizeCopy(parsed.vibeAnalysis.mood) || 'Curated Selection',
-      genres: Array.isArray(parsed.vibeAnalysis.genres)
-        ? parsed.vibeAnalysis.genres.slice(0, 4).map(sanitizeCopy).filter(Boolean)
-        : [],
-      summary: sanitizeCopy(parsed.vibeAnalysis.summary),
-    },
-    recommendations: parsed.recommendations
+  const genres = Array.isArray(parsed.vibeAnalysis.genres)
+    ? parsed.vibeAnalysis.genres.slice(0, 4).map(sanitizeCopy).filter(Boolean)
+    : dominantSubGenres.slice(0, 4);
+
+  const normalizeRecs = (list, defaultLang) =>
+    list
       .filter((item) => item?.title && item?.artist && item?.reason)
       .map((item) => ({
         title: String(item.title).trim(),
         artist: String(item.artist).trim(),
+        subGenre: sanitizeCopy(item.subGenre) || dominantSubGenres[0] || '',
+        language: defaultLang,
         reason: sanitizeCopy(item.reason),
+      }));
+
+  const rawOutliers = Array.isArray(parsed.outliers) ? parsed.outliers : [];
+  const rawSourceClassifications = Array.isArray(parsed.sourceTrackClassifications)
+    ? parsed.sourceTrackClassifications
+    : [];
+
+  return {
+    vibeAnalysis: {
+      mood: sanitizeCopy(parsed.vibeAnalysis.mood) || 'Curated Selection',
+      dominantSubGenres: dominantSubGenres.length > 0 ? dominantSubGenres : genres,
+      genres,
+      summary: sanitizeCopy(parsed.vibeAnalysis.summary),
+    },
+    sourceTrackClassifications: rawSourceClassifications
+      .filter((item) => Number.isInteger(item?.trackNumber))
+      .map((item) => ({
+        trackNumber: item.trackNumber,
+        subGenre: sanitizeCopy(item.subGenre) || '',
+        language: normalizeLanguageCode(item.language),
       })),
+    recommendationsIndonesia: normalizeRecs(rawIndoRecs, 'id'),
+    recommendationsInternasional: normalizeRecs(rawIntlRecs, 'en'),
     outliers: rawOutliers
       .filter((item) => item?.title && item?.reason)
       .map((item) => ({
         trackNumber: Number.isInteger(item.trackNumber) ? item.trackNumber : null,
         title: String(item.title).trim(),
         artist: String(item.artist ?? '').trim(),
-        mismatchScore: Math.min(100, Math.max(1, Number.parseInt(item.mismatchScore ?? 70, 10) || 70)),
+        subGenre: sanitizeCopy(item.subGenre) || '',
+        mismatchScore: Math.min(
+          100,
+          Math.max(1, Number.parseInt(item.mismatchScore ?? 70, 10) || 70)
+        ),
         reason: sanitizeCopy(item.reason),
       })),
   };

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AudioProfileCard } from './components/AudioProfileCard.jsx';
 import { BottomCoverStrip } from './components/BottomCoverStrip.jsx';
 import { HistoryDrawer } from './components/HistoryDrawer.jsx';
 import { ArrowRightGlyph } from './components/Icons.jsx';
 import { LoadingStage } from './components/LoadingStage.jsx';
+import { SoundwaveBackground } from './components/SoundwaveBackground.jsx';
 import { TrackDetailColumn } from './components/TrackDetailColumn.jsx';
 import { TracklistPanel } from './components/TracklistPanel.jsx';
 import { UrlInputView } from './components/UrlInputView.jsx';
@@ -16,12 +18,42 @@ import {
 } from './utils/history.js';
 
 function attachStageKeys(result) {
-  const recommendations = (result.recommendations ?? []).map((track, idx) => ({
+  const rawRecs = result.recommendations;
+  let rawIndo = [];
+  let rawIntl = [];
+
+  if (rawRecs && !Array.isArray(rawRecs)) {
+    rawIndo = Array.isArray(rawRecs.indonesia) ? rawRecs.indonesia : [];
+    rawIntl = Array.isArray(rawRecs.internasional) ? rawRecs.internasional : [];
+  } else if (Array.isArray(rawRecs)) {
+    for (const track of rawRecs) {
+      if (track?.language === 'id') rawIndo.push(track);
+      else rawIntl.push(track);
+    }
+  }
+
+  const recommendationsIndonesia = rawIndo.map((track, idx) => ({
     ...track,
+    language: track.language || 'id',
     _stageKind: 'recommendation',
     _stageIndex: idx + 1,
-    _stageKey: `rec-${track.id || idx}`,
+    _stageKey: `rec-id-${track.id || idx}-${idx}`,
   }));
+
+  const recommendationsInternasional = rawIntl.map((track, idx) => ({
+    ...track,
+    language: track.language || 'en',
+    _stageKind: 'recommendation',
+    _stageIndex: idx + 1,
+    _stageKey: `rec-en-${track.id || idx}-${idx}`,
+  }));
+
+  const recommendations = [...recommendationsIndonesia, ...recommendationsInternasional].map(
+    (track, idx) => ({
+      ...track,
+      _stageIndex: idx + 1,
+    })
+  );
 
   const sourceTracks = (result.sourceTracks ?? []).map((track, idx) => ({
     ...track,
@@ -40,6 +72,8 @@ function attachStageKeys(result) {
   return {
     ...result,
     recommendations,
+    recommendationsIndonesia,
+    recommendationsInternasional,
     sourceTracks,
     outliers,
   };
@@ -55,6 +89,7 @@ export default function App() {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 
   const [activeTab, setActiveTab] = useState('recommendations');
+  const [recLangFilter, setRecLangFilter] = useState('indonesia');
   const [selectedTrackKey, setSelectedTrackKey] = useState(null);
   const [playingTrackKey, setPlayingTrackKey] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -80,12 +115,19 @@ export default function App() {
 
   const outlierIds = useMemo(() => new Set(outlierById.keys()), [outlierById]);
 
+  const activeRecommendationList = useMemo(() => {
+    if (!data) return [];
+    if (recLangFilter === 'indonesia') return data.recommendationsIndonesia ?? [];
+    if (recLangFilter === 'internasional') return data.recommendationsInternasional ?? [];
+    return data.recommendations ?? [];
+  }, [data, recLangFilter]);
+
   const activeList = useMemo(() => {
     if (!data) return [];
     if (activeTab === 'outliers') return data.outliers;
     if (activeTab === 'source') return data.sourceTracks;
-    return data.recommendations;
-  }, [data, activeTab]);
+    return activeRecommendationList;
+  }, [data, activeTab, activeRecommendationList]);
 
   const allStageTracks = useMemo(() => {
     if (!data) return [];
@@ -145,6 +187,7 @@ export default function App() {
         }
       });
       audio.addEventListener('error', () => {
+        if (!audio.getAttribute('src')) return;
         setIsPlaying(false);
         setPlayingTrackKey(null);
         setAudioError('Preview audio gagal diputar oleh browser.');
@@ -157,7 +200,8 @@ export default function App() {
   function stopAudio() {
     if (audioRef.current) {
       audioRef.current.pause();
-      audioRef.current.src = '';
+      audioRef.current.removeAttribute('src');
+      audioRef.current.load();
     }
     setIsPlaying(false);
     setPlayingTrackKey(null);
@@ -173,7 +217,8 @@ export default function App() {
       }
       if (audioRef.current) {
         audioRef.current.pause();
-        audioRef.current.src = '';
+        audioRef.current.removeAttribute('src');
+        audioRef.current.load();
       }
     };
   }, []);
@@ -265,9 +310,31 @@ export default function App() {
 
   function openStagedResult(rawResult) {
     const staged = attachStageKeys(rawResult);
+    const indoCount = staged.recommendationsIndonesia.length;
+    const intlCount = staged.recommendationsInternasional.length;
+    const dist = staged.audioProfile?.languageDistribution;
+    let initialLangFilter = 'all';
+    if (indoCount > 0 && intlCount > 0) {
+      initialLangFilter = (dist?.indonesia ?? indoCount) >= (dist?.internasional ?? intlCount)
+        ? 'indonesia'
+        : 'internasional';
+    } else if (indoCount > 0) {
+      initialLangFilter = 'indonesia';
+    } else if (intlCount > 0) {
+      initialLangFilter = 'internasional';
+    }
+
+    const initialList =
+      initialLangFilter === 'indonesia'
+        ? staged.recommendationsIndonesia
+        : initialLangFilter === 'internasional'
+          ? staged.recommendationsInternasional
+          : staged.recommendations;
+
     setData(staged);
     setActiveTab('recommendations');
-    setSelectedTrackKey(staged.recommendations[0]?._stageKey ?? null);
+    setRecLangFilter(initialLangFilter);
+    setSelectedTrackKey(initialList[0]?._stageKey ?? staged.recommendations[0]?._stageKey ?? null);
     setIsFullTrackMode(false);
     setViewState('results');
   }
@@ -354,6 +421,24 @@ export default function App() {
         ? data.outliers
         : nextTab === 'source'
           ? data.sourceTracks
+          : activeRecommendationList;
+
+    if (list.length > 0) {
+      setSelectedTrackKey(list[0]._stageKey);
+      void syncPlaybackForSelectedTrack(list[0]);
+    }
+  }
+
+  function handleSwitchLangFilter(nextLangFilter) {
+    setRecLangFilter(nextLangFilter);
+    setAudioError('');
+    if (!data) return;
+
+    const list =
+      nextLangFilter === 'indonesia'
+        ? data.recommendationsIndonesia
+        : nextLangFilter === 'internasional'
+          ? data.recommendationsInternasional
           : data.recommendations;
 
     if (list.length > 0) {
@@ -372,6 +457,12 @@ export default function App() {
     setAudioError('');
     if (track._stageKind === 'recommendation') {
       setActiveTab('recommendations');
+      if (recLangFilter !== 'all') {
+        const trackLangGroup = track.language === 'id' ? 'indonesia' : 'internasional';
+        if (recLangFilter !== trackLangGroup) {
+          setRecLangFilter(trackLangGroup);
+        }
+      }
       setSelectedTrackKey(track._stageKey);
       void syncPlaybackForSelectedTrack(track);
       return;
@@ -437,12 +528,23 @@ export default function App() {
     });
   }
 
-  if (viewState === 'loading') {
-    return <LoadingStage onCancel={handleCancelLoading} />;
-  }
+  const activeTrackIsPlaying = Boolean(
+    viewState === 'results' &&
+      activeTrack &&
+      isPlaying &&
+      playingTrackKey === activeTrack._stageKey
+  );
+  const activeTrackTime =
+    viewState === 'results' && activeTrack && playingTrackKey === activeTrack._stageKey
+      ? audioCurrentTime
+      : 0;
 
-  if (viewState === 'input' || !data) {
-    return (
+  let stageView = null;
+
+  if (viewState === 'loading') {
+    stageView = <LoadingStage onCancel={handleCancelLoading} />;
+  } else if (viewState === 'input' || !data) {
+    stageView = (
       <UrlInputView
         playlistUrl={playlistUrl}
         onPlaylistUrlChange={(val) => {
@@ -458,16 +560,9 @@ export default function App() {
         onClearHistory={handleClearHistory}
       />
     );
-  }
-
-  const activeTrackIsPlaying = Boolean(
-    activeTrack && isPlaying && playingTrackKey === activeTrack._stageKey
-  );
-  const activeTrackTime =
-    activeTrack && playingTrackKey === activeTrack._stageKey ? audioCurrentTime : 0;
-
-  return (
-    <div className="min-h-dvh bg-[#F6F3F0] text-[#181818] flex flex-col justify-between">
+  } else {
+    stageView = (
+      <div className="relative z-10 min-h-dvh text-[#181818] flex flex-col justify-between">
       <header className="w-full max-w-[1400px] mx-auto px-5 sm:px-8 lg:px-12 py-4 sm:py-6 border-b border-[#181818]/10 grid grid-cols-2 md:grid-cols-12 items-center gap-x-4 gap-y-2">
         <div className="col-span-1 md:col-span-2 flex items-center">
           <button
@@ -485,9 +580,9 @@ export default function App() {
             onClick={() => setIsHistoryOpen(true)}
             aria-expanded={isHistoryOpen}
             aria-controls="history-drawer"
-            className="min-h-[44px] px-2 font-mono text-xs sm:text-sm text-[#6E6A66] hover:text-[#181818] transition-colors"
+            className="min-h-[44px] px-2 text-xs sm:text-sm font-medium text-[#6E6A66] hover:text-[#181818] transition-colors"
           >
-            Riwayat ({history.length})
+            Riwayat (<span className="font-mono tabular-nums">{history.length}</span>)
           </button>
 
           <button
@@ -514,7 +609,7 @@ export default function App() {
                 : 'border-transparent text-[#6E6A66] hover:text-[#181818]'
             }`}
           >
-            Rekomendasi ({data.recommendations.length})
+            Rekomendasi (<span className="font-mono tabular-nums">{data.recommendations.length}</span>)
           </button>
 
           <button
@@ -527,13 +622,13 @@ export default function App() {
                 : 'border-transparent text-[#6E6A66] hover:text-[#181818]'
             }`}
           >
-            Kurang Cocok ({data.outliers.length})
+            Keluar Jalur (<span className="font-mono tabular-nums">{data.outliers.length}</span>)
           </button>
         </nav>
 
         <div className="col-span-2 md:col-span-4 md:order-3 md:text-center min-w-0">
-          <p className="font-mono text-xs text-[#181818] truncate">
-            {data.playlistInfo.totalTracks} tracks · {data.vibeAnalysis.mood}
+          <p className="text-xs font-medium text-[#181818] truncate">
+            <span className="font-mono tabular-nums">{data.playlistInfo.totalTracks}</span> lagu · {data.vibeAnalysis.mood}
           </p>
           <p className="text-xs text-[#6E6A66] truncate">
             {data.playlistInfo.name}
@@ -541,7 +636,13 @@ export default function App() {
         </div>
       </header>
 
-      <main className="flex-1 w-full max-w-[1400px] mx-auto px-5 sm:px-8 lg:px-12 py-8 sm:py-10 lg:py-12 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-8 lg:gap-10 items-center">
+      <AudioProfileCard
+        playlistInfo={data.playlistInfo}
+        vibeAnalysis={data.vibeAnalysis}
+        audioProfile={data.audioProfile}
+      />
+
+      <main className="flex-1 w-full max-w-[1400px] mx-auto px-5 sm:px-8 lg:px-12 py-6 sm:py-8 lg:py-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-8 lg:gap-10 items-center">
         <div className="md:col-span-1 lg:col-span-4">
           <VinylShowcase track={activeTrack} isPlaying={activeTrackIsPlaying} />
         </div>
@@ -552,6 +653,7 @@ export default function App() {
             trackContext={activeTrackContext}
             playlistInfo={data.playlistInfo}
             vibeAnalysis={data.vibeAnalysis}
+            audioProfile={data.audioProfile}
             isPlaying={activeTrackIsPlaying}
             audioCurrentTime={activeTrackTime}
             audioDuration={audioDuration}
@@ -572,6 +674,13 @@ export default function App() {
             isPlaying={isPlaying}
             outlierIds={outlierIds}
             vibeMood={data.vibeAnalysis.mood}
+            langFilter={recLangFilter}
+            langCounts={{
+              indonesia: data.recommendationsIndonesia?.length ?? 0,
+              internasional: data.recommendationsInternasional?.length ?? 0,
+              all: data.recommendations?.length ?? 0,
+            }}
+            onLangFilterChange={handleSwitchLangFilter}
             onSelectTrack={handleSelectTrack}
             onSwitchToRecommendations={() => handleSwitchTab('recommendations')}
           />
@@ -609,5 +718,19 @@ export default function App() {
         onClearHistory={handleClearHistory}
       />
     </div>
+    );
+  }
+
+  return (
+    <>
+      <SoundwaveBackground
+        isAnalyzing={viewState === 'loading'}
+        isPlaying={isPlaying}
+        tempo={activeTrack?.audioFeatures?.tempo ?? data?.audioProfile?.centroid?.tempo ?? 100}
+        energy={activeTrack?.audioFeatures?.energy ?? data?.audioProfile?.centroid?.energy ?? 0.5}
+        currentTime={audioCurrentTime}
+      />
+      <div className="relative z-10 min-h-dvh">{stageView}</div>
+    </>
   );
 }

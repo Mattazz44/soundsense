@@ -2,6 +2,7 @@ import { formatHistoryTime } from '../utils/history.js';
 import { AlertMarkIcon, ArrowRightGlyph } from './Icons.jsx';
 
 const EXAMPLE_PLAYLIST_URL = 'https://open.spotify.com/playlist/37i9dQZF1DX4WYpdgoIcn6';
+const RECOMMENDATION_LIMITS = [10, 15, 20];
 
 export function UrlInputView({
   playlistUrl,
@@ -19,12 +20,12 @@ export function UrlInputView({
   }
 
   return (
-    <div className="min-h-dvh bg-[#F6F3F0] text-[#181818] flex flex-col">
+    <div className="relative z-10 min-h-dvh text-[#181818] flex flex-col">
       <header className="w-full max-w-[1320px] mx-auto px-5 sm:px-8 lg:px-12 py-6 flex flex-wrap items-center justify-between gap-4 border-b border-[#181818]/10">
         <span className="font-sans font-bold text-lg tracking-[-0.02em] text-[#181818]">
           SoundSense
         </span>
-        <span className="font-mono text-xs text-[#6E6A66]">
+        <span className="text-xs font-medium text-[#6E6A66]">
           Kurasi &amp; audit playlist Spotify
         </span>
       </header>
@@ -37,9 +38,10 @@ export function UrlInputView({
                 Kurasi playlist Spotify Anda, dan temukan lagu yang keluar jalur.
               </h1>
               <p className="text-[15px] sm:text-base leading-[1.7] text-[#6E6A66] max-w-[56ch]">
-                Tempel tautan playlist publik Spotify di bawah. SoundSense membaca hingga 50 lagu
-                pertama untuk merangkum suasana utama, menyarankan lagu baru beserta alasan musikalnya,
-                dan menandai lagu di playlist asal yang kurang selaras.
+                Tempel tautan playlist publik Spotify di bawah. SoundSense membaca hingga{' '}
+                <span className="font-mono tabular-nums text-[#181818] font-medium">100</span> lagu
+                pertama untuk menghitung profil audio inti, menyarankan lagu baru beserta kecocokan
+                fiturnya, dan menandai lagu di playlist asal yang kurang selaras.
               </p>
             </div>
 
@@ -55,7 +57,7 @@ export function UrlInputView({
                   <button
                     type="button"
                     onClick={handleFillExample}
-                    className="min-h-[44px] px-2 -mr-2 inline-flex items-center font-mono text-xs text-[#9E472A] underline underline-offset-4 hover:text-[#181818] active:opacity-75 transition-colors"
+                    className="min-h-[44px] px-2 -mr-2 inline-flex items-center text-xs font-medium text-[#9E472A] underline underline-offset-4 hover:text-[#181818] active:opacity-75 transition-colors"
                   >
                     Pakai contoh link playlist
                   </button>
@@ -72,7 +74,7 @@ export function UrlInputView({
                   placeholder="https://open.spotify.com/playlist/..."
                   aria-invalid={Boolean(errorMessage)}
                   aria-describedby={errorMessage ? 'playlist-url-error' : 'playlist-url-hint'}
-                  className="w-full min-h-[48px] px-4 py-3 bg-[#FFFFFF] border border-[#8A837C] text-[#181818] placeholder:text-[#6E6A66] text-sm sm:text-[15px] font-mono rounded-[2px] focus:border-[#181818] transition-colors"
+                  className="w-full min-h-[48px] px-4 py-3 bg-[#FFFFFF] border border-[#8A837C] text-[#181818] placeholder:text-[#6E6A66] text-sm sm:text-[15px] font-sans rounded-[2px] focus:border-[#181818] transition-colors"
                 />
 
                 <p id="playlist-url-hint" className="text-xs text-[#6E6A66]">
@@ -96,8 +98,8 @@ export function UrlInputView({
                   <legend className="text-sm font-medium text-[#181818]">
                     Jumlah rekomendasi
                   </legend>
-                  <div className="inline-flex gap-2" role="radiogroup" aria-label="Jumlah rekomendasi">
-                    {[10, 15].map((count) => {
+                  <div className="inline-flex flex-wrap gap-2" role="radiogroup" aria-label="Jumlah rekomendasi">
+                    {RECOMMENDATION_LIMITS.map((count) => {
                       const selected = limit === count;
                       return (
                         <button
@@ -106,13 +108,13 @@ export function UrlInputView({
                           role="radio"
                           aria-checked={selected}
                           onClick={() => onLimitChange(count)}
-                          className={`min-h-[44px] min-w-[68px] px-4 font-mono text-sm border transition-colors ${
+                          className={`min-h-[44px] min-w-[76px] px-4 text-sm border transition-colors ${
                             selected
                               ? 'bg-[#181818] text-[#F6F3F0] border-[#181818] font-medium'
                               : 'bg-transparent text-[#181818] border-[#8A837C] hover:border-[#181818] hover:bg-[#EFE9E5]'
                           }`}
                         >
-                          {count} lagu
+                          <span className="font-mono tabular-nums">{count}</span> lagu
                         </button>
                       );
                     })}
@@ -132,51 +134,51 @@ export function UrlInputView({
 
           <aside
             aria-label="Pratinjau tahapan analisis"
-            className="lg:col-span-5 bg-[#EFE9E5] p-6 sm:p-8 lg:p-10 space-y-8 border border-[#181818]/10"
+            className="lg:col-span-5 bg-white/80 backdrop-blur-sm p-6 sm:p-8 lg:p-10 space-y-8 border border-[#181818]/12"
           >
-            <div className="relative w-[176px] sm:w-[208px] aspect-square mx-auto lg:mx-0">
+            <div className="group relative w-[176px] sm:w-[208px] aspect-square mx-auto lg:mx-0">
               <div
                 aria-hidden="true"
-                className="vinyl-disc absolute top-1/2 -translate-y-1/2 right-[-26%] w-[88%] aspect-square rounded-full"
+                className="vinyl-disc vinyl-spin-idle absolute top-1/2 -translate-y-1/2 right-[-26%] w-[88%] aspect-square rounded-full transition-transform duration-500 ease-out group-hover:translate-x-3 group-hover:rotate-12"
               >
                 <div className="vinyl-sheen w-full h-full rounded-full" />
               </div>
               <div className="relative z-10 w-full h-full bg-[#F6F3F0] border border-[#181818]/15 p-5 flex flex-col justify-between shadow-[0_14px_32px_rgba(24,24,24,0.10)]">
-                <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-[#6E6A66]">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.04em] text-[#6E6A66]">
                   Side A · Liner Notes
                 </span>
                 <div className="space-y-1">
                   <p className="font-sans font-bold text-base tracking-[-0.02em] text-[#181818]">
                     Menunggu Tautan
                   </p>
-                  <p className="font-mono text-xs text-[#6E6A66]">
-                    50 tracks max · Spotify API
+                  <p className="text-xs text-[#6E6A66]">
+                    <span className="font-mono tabular-nums">100</span> lagu maks · Micro-Genre &amp; Audio
                   </p>
                 </div>
               </div>
             </div>
 
             <div className="space-y-4 pt-2 border-t border-[#181818]/12">
-              <h2 className="font-mono text-xs font-medium text-[#5E5A56]">
+              <h2 className="text-xs font-semibold text-[#5E5A56]">
                 Yang Anda dapatkan
               </h2>
               <ol className="space-y-3 text-sm text-[#181818]">
                 <li className="flex gap-3">
-                  <span className="font-mono text-xs text-[#5E5A56] pt-0.5">01</span>
+                  <span className="font-mono text-xs tabular-nums text-[#5E5A56] pt-0.5">01</span>
                   <span>
-                    Ringkasan mood utama dan genre dominan dari playlist Anda.
+                    Ringkasan mood utama, genre dominan, dan profil fitur audio playlist Anda.
                   </span>
                 </li>
                 <li className="flex gap-3">
-                  <span className="font-mono text-xs text-[#5E5A56] pt-0.5">02</span>
+                  <span className="font-mono text-xs tabular-nums text-[#5E5A56] pt-0.5">02</span>
                   <span>
-                    Daftar lagu rekomendasi baru lengkap dengan alasan kecocokan, preview audio, dan lirik sinkron.
+                    Daftar lagu rekomendasi baru terurut berdasarkan kemiripan audio, lengkap dengan preview 30 detik dan lirik sinkron.
                   </span>
                 </li>
                 <li className="flex gap-3">
-                  <span className="font-mono text-xs text-[#5E5A56] pt-0.5">03</span>
+                  <span className="font-mono text-xs tabular-nums text-[#5E5A56] pt-0.5">03</span>
                   <span>
-                    Deteksi lagu di dalam playlist asal yang kurang selaras beserta penjelasan ketidaksesuaiannya.
+                    Deteksi lagu di dalam playlist asal yang keluar jalur berbasis jarak centroid dan Z-score.
                   </span>
                 </li>
               </ol>
@@ -190,13 +192,13 @@ export function UrlInputView({
             className="pt-8 border-t border-[#181818]/10 space-y-5"
           >
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="font-mono text-xs uppercase tracking-[0.06em] text-[#6E6A66]">
-                RIWAYAT KURASI TERAKHIR
+              <h2 className="text-xs font-semibold uppercase tracking-[0.04em] text-[#6E6A66]">
+                Riwayat Kurasi Terakhir
               </h2>
               <button
                 type="button"
                 onClick={onClearHistory}
-                className="min-h-[44px] px-3 font-mono text-xs text-[#6E6A66] underline underline-offset-4 hover:text-[#9E472A] transition-colors"
+                className="min-h-[44px] px-3 text-xs font-medium text-[#6E6A66] underline underline-offset-4 hover:text-[#9E472A] transition-colors"
               >
                 Hapus Riwayat
               </button>
@@ -212,7 +214,7 @@ export function UrlInputView({
                     key={entry.id}
                     type="button"
                     onClick={() => onSelectHistory(entry)}
-                    className="p-4 bg-[#EFE9E5] border border-[#181818]/10 hover:border-[#181818] text-left flex items-center gap-4 transition-colors"
+                    className="p-4 bg-white/80 backdrop-blur-sm border border-[#181818]/12 hover:border-[#181818] text-left flex items-center gap-4 transition-colors"
                   >
                     <div className="w-14 h-14 shrink-0 bg-[#E4DCD6] border border-[#181818]/10 overflow-hidden">
                       {info.image ? (
@@ -225,7 +227,7 @@ export function UrlInputView({
                           className="w-full h-full object-cover block"
                         />
                       ) : (
-                        <span className="w-full h-full flex items-center justify-center font-mono text-xs text-[#5E5A56]">
+                        <span className="w-full h-full flex items-center justify-center text-xs font-medium text-[#5E5A56]">
                           PL
                         </span>
                       )}
@@ -235,11 +237,11 @@ export function UrlInputView({
                       <p className="font-sans font-semibold text-sm text-[#181818] truncate">
                         {info.name}
                       </p>
-                      <p className="font-mono text-xs text-[#5E5A56] truncate">
+                      <p className="text-xs text-[#5E5A56] truncate">
                         {vibe?.mood || 'Curated'}
                       </p>
-                      <p className="font-mono text-[11px] text-[#5E5A56] truncate">
-                        {info.totalTracks} lagu · {formatHistoryTime(entry.analyzedAt)}
+                      <p className="text-[11px] text-[#5E5A56] truncate">
+                        <span className="font-mono tabular-nums">{info.totalTracks}</span> lagu · {formatHistoryTime(entry.analyzedAt)}
                       </p>
                     </div>
                   </button>

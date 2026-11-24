@@ -47,8 +47,8 @@ export function HistoryDrawer({
             <h2 className="font-sans font-bold text-base tracking-[-0.01em] text-[#181818]">
               Riwayat Kurasi
             </h2>
-            <p className="font-mono text-xs text-[#6E6A66]">
-              {history.length} playlist tersimpan
+            <p className="text-xs text-[#6E6A66]">
+              <span className="font-mono tabular-nums">{history.length}</span> playlist tersimpan
             </p>
           </div>
 
@@ -98,7 +98,7 @@ export function HistoryDrawer({
                         className="w-full h-full object-cover block"
                       />
                     ) : (
-                      <span className="w-full h-full flex items-center justify-center font-mono text-[10px] text-[#5E5A56]">
+                      <span className="w-full h-full flex items-center justify-center text-[10px] font-medium text-[#5E5A56]">
                         PL
                       </span>
                     )}
@@ -109,12 +109,13 @@ export function HistoryDrawer({
                       <p className="font-sans font-semibold text-sm text-[#181818] truncate">
                         {info.name}
                       </p>
-                      <span className="font-mono text-[11px] text-[#5E5A56] shrink-0">
+                      <span className="text-[11px] text-[#5E5A56] shrink-0">
                         {formatHistoryTime(entry.analyzedAt)}
                       </span>
                     </div>
-                    <p className="font-mono text-xs text-[#5E5A56] truncate">
-                      {vibe?.mood || 'Curated'} · {info.totalTracks} lagu
+                    <p className="text-xs text-[#5E5A56] truncate">
+                      {vibe?.mood || 'Curated'} ·{' '}
+                      <span className="font-mono tabular-nums">{info.totalTracks}</span> lagu
                     </p>
                   </div>
                 </button>
@@ -128,7 +129,7 @@ export function HistoryDrawer({
             <button
               type="button"
               onClick={onClearHistory}
-              className="min-h-[44px] px-4 border border-[#8A837C] font-mono text-xs text-[#181818] hover:border-[#9E472A] hover:text-[#9E472A] transition-colors"
+              className="min-h-[44px] px-4 border border-[#8A837C] text-xs font-medium text-[#181818] hover:border-[#9E472A] hover:text-[#9E472A] transition-colors"
             >
               Hapus Riwayat
             </button>

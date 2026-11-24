@@ -4,12 +4,29 @@ import cors from 'cors';
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { AppError } from './errors.js';
+import {
+  computePlaylistAudioProfile,
+  detectStatisticalOutliers,
+  fetchAudioFeaturesByIds,
+  fetchReccoBeatsSeedCandidates,
+  scoreTrackAgainstProfile,
+  selectCoreSeedTrackIds,
+} from './services/audioAnalysisService.js';
 import { generatePlaylistRecommendations } from './services/geminiService.js';
 import { getTrackLyrics } from './services/lyricsService.js';
+import {
+  classifyTrackLanguage,
+  computeSubGenreAlignment,
+  gatherDominantArtistMetadata,
+  normalizeGenreLabel,
+  titleCaseGenre,
+} from './services/genreLanguageService.js';
 import {
   enrichRecommendations,
   extractPlaylistId,
   getPlaylistWithTracks,
+  searchMicroGenreTracks,
+  spotifySafeFetch,
 } from './services/spotifyService.js';
 
 const app = express();
@@ -112,6 +129,100 @@ export function resolveOutliersAgainstTracks(rawOutliers, sourceTracks) {
   return resolved.sort((a, b) => b.mismatchScore - a.mismatchScore).slice(0, 6);
 }
 
+export function computeLanguageSplitTargets(limit, indonesiaCount, internasionalCount) {
+  const total = indonesiaCount + internasionalCount;
+  const minPerGroup = limit >= 10 ? Math.max(2, Math.round(limit * 0.25)) : 1;
+  const maxPerGroup = Math.max(minPerGroup, limit - minPerGroup);
+
+  if (total === 0) {
+    const indonesia = Math.ceil(limit / 2);
+    return { indonesia, internasional: limit - indonesia };
+  }
+
+  const ratio = indonesiaCount / total;
+  // Keep both Indonesia and Internasional tabs populated even for single-language playlists.
+  let indonesia = Math.round(ratio * limit);
+  if (ratio >= 0.85) {
+    indonesia = Math.round(limit * 0.7);
+  } else if (ratio <= 0.15) {
+    indonesia = Math.round(limit * 0.3);
+  }
+
+  indonesia = Math.max(minPerGroup, Math.min(maxPerGroup, indonesia));
+  const internasional = Math.max(1, limit - indonesia);
+  return { indonesia, internasional };
+}
+
+function mergeCombinedOutliers(
+  statisticalOutliers,
+  aiOutliers,
+  sourceTracks,
+  dominantSubGenres
+) {
+  const resolvedAi = resolveOutliersAgainstTracks(aiOutliers, sourceTracks);
+  const aiByTrackNum = new Map();
+  const aiByTitle = new Map();
+  for (const item of aiOutliers ?? []) {
+    if (Number.isInteger(item.trackNumber)) {
+      aiByTrackNum.set(item.trackNumber, item);
+    }
+    if (item.title) {
+      aiByTitle.set(item.title.toLowerCase(), item);
+    }
+  }
+
+  const mergedByIndex = new Map();
+
+  for (const stat of statisticalOutliers ?? []) {
+    const track = sourceTracks[stat.trackNumber - 1] ?? stat;
+    const aiMatch =
+      aiByTrackNum.get(stat.trackNumber) || aiByTitle.get(stat.title.toLowerCase());
+    mergedByIndex.set(stat.trackNumber, {
+      ...track,
+      trackNumber: stat.trackNumber,
+      subGenre: aiMatch?.subGenre || track.subGenre || '',
+      mismatchScore: stat.mismatchScore,
+      reason: aiMatch?.reason ? aiMatch.reason : stat.reason,
+    });
+  }
+
+  for (const aiItem of resolvedAi) {
+    const existing = mergedByIndex.get(aiItem.trackNumber);
+    if (existing) {
+      mergedByIndex.set(aiItem.trackNumber, {
+        ...existing,
+        subGenre: existing.subGenre || aiItem.subGenre || '',
+        reason: aiItem.reason || existing.reason,
+        mismatchScore: Math.max(existing.mismatchScore, aiItem.mismatchScore),
+      });
+    } else {
+      mergedByIndex.set(aiItem.trackNumber, {
+        ...aiItem,
+        subGenre: aiItem.subGenre || sourceTracks[aiItem.trackNumber - 1]?.subGenre || '',
+      });
+    }
+  }
+
+  // Deterministic sub-genre clash sweep so blatant genre mismatches are always caught.
+  for (const track of sourceTracks) {
+    if (mergedByIndex.has(track.trackNumber) || !track.subGenre) continue;
+    const align = computeSubGenreAlignment(track.subGenre, dominantSubGenres);
+    const hasLowAudioFit = track.similarityScore !== null && track.similarityScore < 75;
+    if (align.isClash && (hasLowAudioFit || dominantSubGenres.length > 0)) {
+      const domLabel = dominantSubGenres.slice(0, 2).join(', ') || 'karakter inti playlist';
+      mergedByIndex.set(track.trackNumber, {
+        ...track,
+        mismatchScore: hasLowAudioFit ? 78 : 68,
+        reason: `Sub-genre ${track.subGenre} pada lagu ini bertolak belakang dengan identitas dominan ${domLabel} di playlist asal.`,
+      });
+    }
+  }
+
+  return Array.from(mergedByIndex.values())
+    .sort((a, b) => (b.mismatchScore ?? 0) - (a.mismatchScore ?? 0))
+    .slice(0, 6);
+}
+
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', service: 'soundsense-backend' });
 });
@@ -138,19 +249,173 @@ app.post('/api/recommend', recommendLimiter, async (req, res, next) => {
     const limit = parseLimit(rawLimit);
 
     const { playlistInfo, tracks } = await getPlaylistWithTracks(playlistId);
+    const trackIds = tracks.map((track) => track.id).filter(Boolean);
+    const featuresById = await fetchAudioFeaturesByIds(trackIds);
+    const audioProfile = computePlaylistAudioProfile(tracks, featuresById);
+    const statisticalOutliers = detectStatisticalOutliers(tracks, featuresById, audioProfile);
+    const coreSeedIds = selectCoreSeedTrackIds(tracks, featuresById, audioProfile, 5);
+
+    const [artistMetaByName, seedCandidates] = await Promise.all([
+      gatherDominantArtistMetadata(audioProfile.dominantArtists, spotifySafeFetch, tracks),
+      fetchReccoBeatsSeedCandidates(coreSeedIds, 25),
+    ]);
+
+    const preTagFreq = new Map();
+    for (const meta of artistMetaByName.values()) {
+      for (const tag of meta.tags ?? []) {
+        const clean = normalizeGenreLabel(tag);
+        if (clean) {
+          preTagFreq.set(clean, (preTagFreq.get(clean) ?? 0) + 1);
+        }
+      }
+    }
+    const preSubGenres = Array.from(preTagFreq.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([tag]) => tag)
+      .slice(0, 3);
+
+    let preIndoCount = 0;
+    let preIntlCount = 0;
+    for (const track of tracks) {
+      const primaryArtist = String(track.artist ?? '').split(',')[0]?.trim().toLowerCase();
+      const meta = artistMetaByName.get(primaryArtist);
+      const lang = classifyTrackLanguage({
+        title: track.title,
+        artist: track.artist,
+        subGenre: meta?.tags?.[0] ?? '',
+        artistCountry: meta?.country ?? null,
+      });
+      if (lang === 'id') preIndoCount += 1;
+      else preIntlCount += 1;
+    }
+
+    const preLanguageSplit = computeLanguageSplitTargets(limit, preIndoCount, preIntlCount);
+    const microGenreSeeds =
+      preSubGenres.length > 0 ? await searchMicroGenreTracks(preSubGenres, 6) : [];
+
     const aiResult = await generatePlaylistRecommendations({
       playlistInfo,
       tracks,
       limit,
+      languageSplit: preLanguageSplit,
+      audioProfile,
+      artistMetaByName,
+      seedCandidates,
+      microGenreSeeds,
+      statisticalOutliers,
     });
 
-    const recommendations = await enrichRecommendations(
-      aiResult.recommendations,
-      tracks,
-      limit
-    );
+    const seenSubGenreKeys = new Set();
+    const dominantSubGenres = [];
+    for (const rawTag of [
+      ...(aiResult.vibeAnalysis.dominantSubGenres ?? []),
+      ...preSubGenres,
+      ...(aiResult.vibeAnalysis.genres ?? []),
+    ]) {
+      const norm = normalizeGenreLabel(rawTag);
+      if (!norm || seenSubGenreKeys.has(norm)) continue;
+      seenSubGenreKeys.add(norm);
+      dominantSubGenres.push(titleCaseGenre(norm));
+      if (dominantSubGenres.length >= 6) break;
+    }
 
-    if (recommendations.length === 0) {
+    const classByTrackNumber = new Map();
+    for (const item of aiResult.sourceTrackClassifications ?? []) {
+      classByTrackNumber.set(item.trackNumber, item);
+    }
+
+    let indoTrackCount = 0;
+    let intlTrackCount = 0;
+    const enrichedSourceTracks = tracks.map((track, idx) => {
+      const trackNumber = idx + 1;
+      const features = track.id ? featuresById.get(track.id) : null;
+      const metrics = features ? scoreTrackAgainstProfile(features, audioProfile) : null;
+      const primaryArtist = String(track.artist ?? '').split(',')[0]?.trim().toLowerCase();
+      const artistMeta = artistMetaByName.get(primaryArtist);
+      const aiClass = classByTrackNumber.get(trackNumber);
+      const rawSubGenre = aiClass?.subGenre || artistMeta?.tags?.[0] || dominantSubGenres[0] || '';
+      const language = classifyTrackLanguage({
+        title: track.title,
+        artist: track.artist,
+        subGenre: rawSubGenre,
+        artistCountry: artistMeta?.country ?? null,
+        aiLanguage: aiClass?.language ?? null,
+      });
+
+      if (language === 'id') indoTrackCount += 1;
+      else intlTrackCount += 1;
+
+      return {
+        ...track,
+        trackNumber,
+        subGenre: rawSubGenre ? titleCaseGenre(rawSubGenre) : '',
+        language,
+        similarityScore: metrics?.similarityScore ?? null,
+        audioFeatures: features
+          ? {
+              ...features,
+              tempo: Math.round(features.tempo),
+            }
+          : null,
+      };
+    });
+
+    const finalLanguageSplit = computeLanguageSplitTargets(limit, indoTrackCount, intlTrackCount);
+    const [indoPool, intlPool] = await Promise.all([
+      enrichRecommendations(
+        aiResult.recommendationsIndonesia,
+        tracks,
+        finalLanguageSplit.indonesia + 4,
+        {
+          audioProfile,
+          dominantSubGenres,
+          fetchFeaturesFn: fetchAudioFeaturesByIds,
+          scoreFn: scoreTrackAgainstProfile,
+          subGenreAlignFn: computeSubGenreAlignment,
+          classifyLangFn: classifyTrackLanguage,
+          artistMetaByName,
+          targetLanguage: 'id',
+        }
+      ),
+      enrichRecommendations(
+        aiResult.recommendationsInternasional,
+        tracks,
+        finalLanguageSplit.internasional + 4,
+        {
+          audioProfile,
+          dominantSubGenres,
+          fetchFeaturesFn: fetchAudioFeaturesByIds,
+          scoreFn: scoreTrackAgainstProfile,
+          subGenreAlignFn: computeSubGenreAlignment,
+          classifyLangFn: classifyTrackLanguage,
+          artistMetaByName,
+          targetLanguage: 'en',
+        }
+      ),
+    ]);
+
+    const formatRecItem = (item) => ({
+      ...item,
+      subGenre: item.subGenre ? titleCaseGenre(item.subGenre) : dominantSubGenres[0] || '',
+    });
+
+    let indoRecs = indoPool.slice(0, finalLanguageSplit.indonesia).map(formatRecItem);
+    let intlRecs = intlPool.slice(0, finalLanguageSplit.internasional).map(formatRecItem);
+
+    // Top up any shortfall using validated overflow from the peer language bucket while preserving strict separation.
+    const currentTotal = indoRecs.length + intlRecs.length;
+    if (currentTotal < limit) {
+      const remaining = limit - currentTotal;
+      if (indoRecs.length < finalLanguageSplit.indonesia && intlPool.length > intlRecs.length) {
+        const extraIntl = intlPool.slice(intlRecs.length, intlRecs.length + remaining).map(formatRecItem);
+        intlRecs = [...intlRecs, ...extraIntl];
+      } else if (intlRecs.length < finalLanguageSplit.internasional && indoPool.length > indoRecs.length) {
+        const extraIndo = indoPool.slice(indoRecs.length, indoRecs.length + remaining).map(formatRecItem);
+        indoRecs = [...indoRecs, ...extraIndo];
+      }
+    }
+
+    if (indoRecs.length === 0 && intlRecs.length === 0) {
       throw new AppError(
         502,
         'NO_SPOTIFY_MATCHES',
@@ -158,19 +423,38 @@ app.post('/api/recommend', recommendLimiter, async (req, res, next) => {
       );
     }
 
-    const outliers = resolveOutliersAgainstTracks(aiResult.outliers, tracks);
+    const outliers = mergeCombinedOutliers(
+      statisticalOutliers,
+      aiResult.outliers,
+      enrichedSourceTracks,
+      dominantSubGenres
+    );
 
     res.json({
       playlistInfo: {
         ...playlistInfo,
         analyzedTracks: tracks.length,
       },
-      vibeAnalysis: aiResult.vibeAnalysis,
-      sourceTracks: tracks.map((track, idx) => ({
-        ...track,
-        trackNumber: idx + 1,
-      })),
-      recommendations,
+      audioProfile: {
+        hasAudioProfile: audioProfile.hasAudioProfile,
+        sampleSize: audioProfile.sampleSize,
+        dominantArtists: audioProfile.dominantArtists,
+        dominantSubGenres,
+        languageDistribution: {
+          indonesia: indoTrackCount,
+          internasional: intlTrackCount,
+        },
+        centroid: audioProfile.centroid,
+      },
+      vibeAnalysis: {
+        ...aiResult.vibeAnalysis,
+        dominantSubGenres,
+      },
+      sourceTracks: enrichedSourceTracks,
+      recommendations: {
+        indonesia: indoRecs,
+        internasional: intlRecs,
+      },
       outliers,
     });
   } catch (error) {

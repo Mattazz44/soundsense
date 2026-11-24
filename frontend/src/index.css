@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Plus Jakarta Sans", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono: "DM Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: "Plus Jakarta Sans", "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --color-canvas: #F6F3F0;
   --color-stone: #EFE9E5;
   --color-ink: #181818;
@@ -26,6 +26,12 @@
     background-color: #F6F3F0;
     color: #181818;
     overflow-x: clip;
+  }
+
+  #root {
+    position: relative;
+    min-height: 100dvh;
+    background-color: transparent;
   }
 
   a[href],
@@ -107,7 +113,7 @@
 @keyframes stage-fade-slide {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(10px);
   }
   to {
     opacity: 1;
@@ -125,13 +131,23 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
+  .vinyl-spin-idle {
+    animation: vinyl-spin 28s linear infinite;
+    animation-play-state: running;
+  }
+
   .vinyl-spin-active {
-    animation: vinyl-spin 10s linear infinite;
+    animation: vinyl-spin 8.5s linear infinite;
     animation-play-state: running;
   }
 
   .stage-enter {
-    animation: stage-fade-slide 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: stage-fade-slide 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .stagger-item {
+    animation: stage-fade-slide 300ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(var(--stagger, 0) * 32ms);
   }
 
   .eq-bar-1 {
@@ -151,9 +167,11 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .vinyl-spin-idle,
   .vinyl-spin-active,
   .vinyl-spin-paused,
   .stage-enter,
+  .stagger-item,
   .eq-bar-1,
   .eq-bar-2,
   .eq-bar-3 {

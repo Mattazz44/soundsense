@@ -74,6 +74,15 @@ async function fetchClientCredentialsToken() {
     body: 'grant_type=client_credentials',
   });
 
+  if (response.status === 429) {
+    const retryAfter = response.headers.get('retry-after');
+    throw new AppError(
+      429,
+      'SPOTIFY_RATE_LIMITED',
+      `Spotify API membatasi jumlah permintaan sementara${retryAfter ? ` (coba lagi dalam ${retryAfter} detik)` : ''}.`
+    );
+  }
+
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
     throw new AppError(
@@ -153,6 +162,15 @@ async function spotifyFetch(path, { allowRetryOnAuth = true } = {}) {
     );
   }
 
+  if (response.status === 429) {
+    const retryAfter = response.headers.get('retry-after');
+    throw new AppError(
+      429,
+      'SPOTIFY_RATE_LIMITED',
+      `Spotify API membatasi jumlah permintaan sementara${retryAfter ? ` (coba lagi dalam ${retryAfter} detik)` : ''}.`
+    );
+  }
+
   if (!response.ok) {
     throw new AppError(
       502,
@@ -190,6 +208,7 @@ function normalizeTrack(track) {
 
   return {
     id: track.id ?? null,
+    artistId: track.artists?.[0]?.id ?? null,
     title: track.name,
     artist: artistNames.join(', ') || 'Unknown Artist',
     album: track.album?.name ?? '',
@@ -345,7 +364,7 @@ export function parseEmbedPlaylistHtml(html, playlistId) {
 
   const playlistCover = pickEmbedPlaylistImage(entity);
   const rawTracks = entity.trackList
-    .slice(0, 50)
+    .slice(0, 100)
     .map((item) => normalizeEmbedTrack(item, playlistCover))
     .filter(Boolean);
 
@@ -390,6 +409,15 @@ async function fetchPlaylistFromEmbed(playlistId) {
     );
   }
 
+  if (response.status === 429) {
+    const retryAfter = response.headers.get('retry-after');
+    throw new AppError(
+      429,
+      'SPOTIFY_RATE_LIMITED',
+      `Spotify API membatasi jumlah permintaan sementara${retryAfter ? ` (coba lagi dalam ${retryAfter} detik)` : ''}.`
+    );
+  }
+
   if (!response.ok) {
     throw new AppError(
       502,
@@ -422,13 +450,13 @@ export async function getPlaylistWithTracks(playlistId) {
     'id,name,description,owner(display_name),images,external_urls(spotify),tracks(total)'
   );
   const trackFields = encodeURIComponent(
-    'items(track(id,type,name,duration_ms,preview_url,external_urls(spotify),artists(name),album(name,release_date,images)))'
+    'items(track(id,type,name,duration_ms,preview_url,external_urls(spotify),artists(id,name),album(name,release_date,images)))'
   );
 
   try {
     const [playlistData, tracksData] = await Promise.all([
       spotifyFetch(`/playlists/${playlistId}?fields=${playlistFields}`),
-      spotifyFetch(`/playlists/${playlistId}/tracks?limit=50&fields=${trackFields}`),
+      spotifyFetch(`/playlists/${playlistId}/tracks?limit=100&fields=${trackFields}`),
     ]);
 
     const tracks = (tracksData.items ?? [])
@@ -522,7 +550,47 @@ async function mapWithConcurrency(items, concurrency, mapper) {
   return results;
 }
 
-export async function enrichRecommendations(aiRecommendations, sourceTracks, limit) {
+export async function spotifySafeFetch(path) {
+  return spotifyFetch(path);
+}
+
+export async function searchMicroGenreTracks(subGenres = [], limitPerGenre = 8) {
+  const queries = subGenres
+    .map((g) => String(g ?? '').trim())
+    .filter(Boolean)
+    .slice(0, 2);
+
+  const collected = [];
+  for (const genre of queries) {
+    try {
+      const q = encodeURIComponent(`genre:"${genre}"`);
+      const res = await spotifyFetch(`/search?q=${q}&type=track&limit=${limitPerGenre}`);
+      const items = (res?.tracks?.items ?? []).map(normalizeTrack).filter(Boolean);
+      for (const item of items) {
+        collected.push({ ...item, subGenre: genre });
+      }
+    } catch {
+      // Ignore individual genre search misses.
+    }
+  }
+  return collected;
+}
+
+export async function enrichRecommendations(
+  aiRecommendations,
+  sourceTracks,
+  limit,
+  {
+    audioProfile = null,
+    dominantSubGenres = [],
+    fetchFeaturesFn = null,
+    scoreFn = null,
+    subGenreAlignFn = null,
+    classifyLangFn = null,
+    artistMetaByName = new Map(),
+    targetLanguage = null,
+  } = {}
+) {
   const seenIds = new Set(sourceTracks.map((track) => track.id).filter(Boolean));
   const seenKeys = new Set(
     sourceTracks.map((track) => buildTrackKey(track.title, track.artist))
@@ -542,6 +610,8 @@ export async function enrichRecommendations(aiRecommendations, sourceTracks, lim
         return {
           ...matched,
           previewUrl,
+          subGenre: item.subGenre || '',
+          aiLanguage: item.language || null,
           reason: item.reason,
         };
       } catch {
@@ -550,7 +620,7 @@ export async function enrichRecommendations(aiRecommendations, sourceTracks, lim
     }
   );
 
-  const results = [];
+  const uniqueCandidates = [];
   for (const track of enrichedCandidates) {
     if (!track) continue;
     const key = buildTrackKey(track.title, track.artist);
@@ -560,12 +630,81 @@ export async function enrichRecommendations(aiRecommendations, sourceTracks, lim
 
     if (track.id) seenIds.add(track.id);
     seenKeys.add(key);
-    results.push(track);
-
-    if (results.length >= limit) {
-      break;
-    }
+    uniqueCandidates.push(track);
   }
 
-  return results;
+  let featuresById = new Map();
+  if (audioProfile?.hasAudioProfile && fetchFeaturesFn && uniqueCandidates.length > 0) {
+    const candidateIds = uniqueCandidates.map((t) => t.id).filter(Boolean);
+    featuresById = await fetchFeaturesFn(candidateIds);
+  }
+
+  const scored = [];
+  for (const track of uniqueCandidates) {
+    const primaryArtist = String(track.artist ?? '').split(',')[0]?.trim().toLowerCase();
+    const artistCountry = artistMetaByName.get(primaryArtist)?.country ?? null;
+    const detectedLanguage = classifyLangFn
+      ? classifyLangFn({
+          title: track.title,
+          artist: track.artist,
+          subGenre: track.subGenre,
+          artistCountry,
+          aiLanguage: track.aiLanguage,
+        })
+      : track.aiLanguage === 'id'
+        ? 'id'
+        : 'en';
+
+    if (targetLanguage && detectedLanguage !== targetLanguage) {
+      continue;
+    }
+
+    const features = track.id ? featuresById.get(track.id) : null;
+    let baseScore = 76;
+    if (features && scoreFn && audioProfile?.hasAudioProfile) {
+      const metrics = scoreFn(features, audioProfile);
+      if (metrics) {
+        baseScore = metrics.similarityScore;
+      }
+
+      // Strict danceability divergence guard (e.g. rejects danceable pop/rock on shoegaze playlists).
+      const centroidDance = audioProfile.centroid?.danceability;
+      if (typeof centroidDance === 'number') {
+        const danceDiff = Math.abs(features.danceability - centroidDance);
+        if (centroidDance <= 0.55 && features.danceability > centroidDance + 0.28) {
+          continue;
+        }
+        if (danceDiff > 0.34) {
+          continue;
+        }
+        if (danceDiff > 0.16) {
+          baseScore -= Math.round((danceDiff - 0.16) * 115);
+        }
+      }
+    }
+
+    const alignment = subGenreAlignFn
+      ? subGenreAlignFn(track.subGenre, dominantSubGenres)
+      : { matches: true, boost: 0, isClash: false };
+
+    if (alignment.isClash && baseScore < 72) {
+      continue;
+    }
+
+    const finalScore = Math.min(99, Math.max(35, baseScore + alignment.boost));
+    scored.push({
+      ...track,
+      language: detectedLanguage,
+      matchScore: finalScore,
+      audioFeatures: features
+        ? {
+            ...features,
+            tempo: Math.round(features.tempo),
+          }
+        : null,
+    });
+  }
+
+  scored.sort((a, b) => b.matchScore - a.matchScore);
+  return scored.slice(0, limit);
 }

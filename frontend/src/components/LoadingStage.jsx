@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 
 const LOADING_STAGES = [
-  'Membaca daftar lagu & katalog Spotify...',
-  'Menganalisis mood, genre, dan tempo playlist...',
-  'AI sedang mengurasi lagu terbaik & mendeteksi lagu kurang cocok...',
-  'Menyiapkan cover album & pratinjau audio 30 detik...',
+  'Membaca hingga 100 lagu & katalog Spotify...',
+  'Menghitung sub-genre spesifik, bahasa & centroid fitur audio...',
+  'AI sedang mengurasi lagu Indonesia & Internasional anti-nyasar...',
+  'Menyiapkan sampul album & pratinjau audio 30 detik...',
 ];
 
 const CURATOR_TRIVIA = [
@@ -45,7 +45,7 @@ export function LoadingStage({ onCancel }) {
   }
 
   return (
-    <div className="min-h-dvh bg-[#F6F3F0] text-[#181818] flex flex-col">
+    <div className="relative z-10 min-h-dvh text-[#181818] flex flex-col">
       <header className="w-full max-w-[1320px] mx-auto px-5 sm:px-8 lg:px-12 py-6 flex items-center justify-between gap-4 border-b border-[#181818]/10">
         <span className="font-sans font-bold text-lg tracking-[-0.02em] text-[#181818]">
           SoundSense
@@ -61,14 +61,14 @@ export function LoadingStage({ onCancel }) {
 
       <main className="flex-1 w-full max-w-[1160px] mx-auto px-5 sm:px-8 lg:px-12 py-10 lg:py-14 grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-center">
         <div className="lg:col-span-5 flex flex-col items-center">
-          <div className="relative w-[270px] sm:w-[320px] aspect-square bg-[#EFE9E5] border border-[#181818]/12 p-5 sm:p-6 shadow-[0_18px_40px_rgba(24,24,24,0.10)] flex items-center justify-center">
+          <div className="relative w-[270px] sm:w-[320px] aspect-square bg-white/80 backdrop-blur-sm border border-[#181818]/12 p-5 sm:p-6 shadow-[0_18px_40px_rgba(24,24,24,0.10)] flex items-center justify-center">
             <div
-              className={`relative w-[86%] aspect-square rounded-full turntable-vinyl-disc flex items-center justify-center ${
+              className={`relative w-[86%] aspect-square rounded-full turntable-vinyl-disc flex items-center justify-center transition-transform duration-500 ${
                 isTurntablePaused ? 'vinyl-spin-paused' : 'vinyl-spin-active'
               }`}
             >
               <div className="vinyl-sheen absolute inset-0 rounded-full pointer-events-none" />
-              <span className="relative z-10 font-mono text-[9px] tracking-[0.06em] text-[#181818] translate-y-5 select-none">
+              <span className="relative z-10 font-mono text-[9px] tracking-[0.04em] text-[#181818] translate-y-5 select-none">
                 33 1/3 RPM
               </span>
             </div>
@@ -106,7 +106,7 @@ export function LoadingStage({ onCancel }) {
           <button
             type="button"
             onClick={() => setIsTurntablePaused((prev) => !prev)}
-            className="mt-4 min-h-[44px] px-4 font-mono text-xs text-[#6E6A66] hover:text-[#181818] underline underline-offset-4 transition-colors"
+            className="mt-4 min-h-[44px] px-4 text-xs font-medium text-[#6E6A66] hover:text-[#181818] underline underline-offset-4 transition-colors"
           >
             {isTurntablePaused ? 'Putar piringan kembali' : 'Jeda animasi piringan'}
           </button>
@@ -115,8 +115,8 @@ export function LoadingStage({ onCancel }) {
         <div className="lg:col-span-7 space-y-8 min-w-0">
           <div className="space-y-4">
             <div className="flex items-baseline justify-between gap-4">
-              <p className="font-mono text-xs text-[#5E5A56]">
-                Sedang Mengurasi Playlist
+              <p className="text-xs font-medium text-[#5E5A56]">
+                Memproses hingga <span className="font-mono tabular-nums">100</span> lagu dari playlist
               </p>
               <span className="font-mono text-sm font-medium text-[#181818] tabular-nums">
                 {progress}%
@@ -147,17 +147,32 @@ export function LoadingStage({ onCancel }) {
             </p>
           </div>
 
+          <div className="grid grid-cols-3 gap-3" aria-hidden="true">
+            <div className="h-10 bg-[#EFE9E5] border border-[#181818]/8 px-3 flex items-center justify-between">
+              <span className="h-2.5 w-16 bg-[#181818]/12" />
+              <span className="h-2.5 w-8 bg-[#181818]/12" />
+            </div>
+            <div className="h-10 bg-[#EFE9E5] border border-[#181818]/8 px-3 flex items-center justify-between">
+              <span className="h-2.5 w-14 bg-[#181818]/12" />
+              <span className="h-2.5 w-8 bg-[#181818]/12" />
+            </div>
+            <div className="h-10 bg-[#EFE9E5] border border-[#181818]/8 px-3 flex items-center justify-between">
+              <span className="h-2.5 w-12 bg-[#181818]/12" />
+              <span className="h-2.5 w-8 bg-[#181818]/12" />
+            </div>
+          </div>
+
           <button
             type="button"
             onClick={handleNextTrivia}
-            className="w-full text-left bg-[#EFE9E5] border border-[#8A837C]/60 hover:border-[#181818] p-5 sm:p-6 space-y-2.5 transition-colors"
+            className="w-full text-left bg-white/80 backdrop-blur-sm border border-[#8A837C]/60 hover:border-[#181818] p-5 sm:p-6 space-y-2.5 transition-colors"
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="font-mono text-[11px] uppercase tracking-[0.06em] text-[#9E472A]">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.04em] text-[#9E472A]">
                 CATATAN KURATOR
               </span>
-              <span className="font-mono text-[11px] text-[#5E5A56]">
-                Fakta {triviaIndex + 1}/{CURATOR_TRIVIA.length} · Klik untuk fakta berikutnya
+              <span className="text-[11px] text-[#5E5A56]">
+                Fakta <span className="font-mono tabular-nums">{triviaIndex + 1}/{CURATOR_TRIVIA.length}</span> · Klik untuk fakta berikutnya
               </span>
             </div>
             <p className="text-sm leading-[1.68] text-[#181818]">

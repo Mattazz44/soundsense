@@ -10,6 +10,9 @@ export function TracklistPanel({
   isPlaying,
   outlierIds,
   vibeMood,
+  langFilter = 'indonesia',
+  langCounts = { indonesia: 0, internasional: 0, all: 0 },
+  onLangFilterChange,
   onSelectTrack,
   onSwitchToRecommendations,
 }) {
@@ -19,7 +22,7 @@ export function TracklistPanel({
     if (listRef.current) {
       listRef.current.scrollTop = 0;
     }
-  }, [mode, tracks]);
+  }, [mode, langFilter, tracks]);
 
   let headingLabel = 'Rekomendasi Lagu';
   if (mode === 'outliers') {
@@ -28,19 +31,60 @@ export function TracklistPanel({
     headingLabel = 'Daftar Lagu Playlist Asal';
   }
 
+  const languageTabs = [
+    { id: 'indonesia', label: 'Indonesia', count: langCounts.indonesia ?? 0 },
+    { id: 'internasional', label: 'Inggris / Intl', count: langCounts.internasional ?? 0 },
+    { id: 'all', label: 'Semua', count: langCounts.all ?? tracks.length },
+  ];
+
   return (
     <section
       aria-label={headingLabel}
-      className="bg-[#EFE9E5] border border-[#181818]/8 p-5 sm:p-7 lg:p-8 flex flex-col lg:min-h-[360px] min-w-0"
+      className="bg-white/80 backdrop-blur-sm border border-[#181818]/12 p-5 sm:p-7 lg:p-8 flex flex-col lg:min-h-[360px] min-w-0"
     >
       <div className="flex items-baseline justify-between gap-3 pb-4 border-b border-[#181818]/10">
-        <h2 className="font-mono text-xs uppercase tracking-[0.06em] text-[#5E5A56]">
+        <h2 className="text-xs font-semibold uppercase tracking-[0.04em] text-[#5E5A56]">
           {headingLabel}
         </h2>
-        <span className="font-mono text-xs text-[#5E5A56]">
-          {tracks.length} tracks
+        <span className="text-xs text-[#5E5A56]">
+          <span className="font-mono tabular-nums">{tracks.length}</span> lagu
         </span>
       </div>
+
+      {mode === 'recommendations' && onLangFilterChange && langCounts.all > 0 && (
+        <div
+          role="tablist"
+          aria-label="Filter bahasa rekomendasi"
+          className="pt-3 pb-1 flex flex-wrap gap-1.5"
+        >
+          {languageTabs.map((tab) => {
+            const selected = langFilter === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                onClick={() => onLangFilterChange(tab.id)}
+                className={`min-h-[44px] px-3 text-xs font-medium border transition-colors inline-flex items-center gap-1.5 ${
+                  selected
+                    ? 'bg-[#181818] text-[#F6F3F0] border-[#181818]'
+                    : 'bg-[#F6F3F0] text-[#181818] border-[#181818]/15 hover:border-[#181818]'
+                }`}
+              >
+                <span>{tab.label}</span>
+                <span
+                  className={`font-mono text-[11px] tabular-nums ${
+                    selected ? 'text-[#F6F3F0]/80' : 'text-[#5E5A56]'
+                  }`}
+                >
+                  ({tab.count})
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {mode === 'outliers' && tracks.length === 0 ? (
         <div className="py-10 space-y-4">
@@ -51,10 +95,25 @@ export function TracklistPanel({
           <button
             type="button"
             onClick={onSwitchToRecommendations}
-            className="min-h-[44px] px-4 border border-[#8A837C] text-xs font-mono text-[#181818] hover:border-[#181818] hover:bg-[#E7E0DB] transition-colors"
+            className="min-h-[44px] px-4 border border-[#8A837C] text-xs font-medium text-[#181818] hover:border-[#181818] hover:bg-[#E7E0DB] transition-colors"
           >
             Lihat Lagu Rekomendasi
           </button>
+        </div>
+      ) : mode === 'recommendations' && tracks.length === 0 ? (
+        <div className="py-10 space-y-4">
+          <p className="text-sm leading-relaxed text-[#181818]">
+            Belum ada rekomendasi pada kelompok bahasa ini untuk sub-genre playlist tersebut.
+          </p>
+          {onLangFilterChange && (
+            <button
+              type="button"
+              onClick={() => onLangFilterChange('all')}
+              className="min-h-[44px] px-4 border border-[#8A837C] text-xs font-medium text-[#181818] hover:border-[#181818] hover:bg-[#E7E0DB] transition-colors"
+            >
+              Tampilkan Semua Rekomendasi
+            </button>
+          )}
         </div>
       ) : (
         <ol
@@ -69,9 +128,21 @@ export function TracklistPanel({
               mode === 'outliers' || (track.id && outlierIds.has(track.id));
             const displayIndex =
               mode === 'outliers' && track.trackNumber ? track.trackNumber : idx + 1;
+            const matchScore = mode === 'recommendations' ? track.matchScore : null;
+            const secondaryParts = [track.artist];
+            if (track.subGenre) {
+              secondaryParts.push(track.subGenre);
+            }
+            if (mode === 'recommendations' && langFilter === 'all' && track.language) {
+              secondaryParts.push(track.language === 'id' ? 'ID' : 'Intl');
+            }
 
             return (
-              <li key={trackKey}>
+              <li
+                key={trackKey}
+                style={{ '--stagger': Math.min(idx, 12) }}
+                className="stagger-item"
+              >
                 <button
                   type="button"
                   onClick={() => onSelectTrack(track, idx)}
@@ -95,18 +166,22 @@ export function TracklistPanel({
                         {track.title}
                       </p>
                       <p className="text-xs text-[#5E5A56] truncate mt-0.5">
-                        {track.artist}
+                        {secondaryParts.join(' · ')}
                       </p>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-2.5 shrink-0">
                     {isRowPlaying && <EqualizerBars className="w-3.5 h-3.5" />}
-                    {isOutlierTrack && (
-                      <span className="font-mono text-[11px] text-[#9E472A]">
-                        Kurang cocok
+                    {isOutlierTrack ? (
+                      <span className="text-[11px] font-medium text-[#9E472A]">
+                        Keluar jalur
                       </span>
-                    )}
+                    ) : matchScore !== null && matchScore !== undefined ? (
+                      <span className="font-mono text-[11px] tabular-nums text-[#5E5A56]">
+                        {matchScore}%
+                      </span>
+                    ) : null}
                     <span className="font-mono text-xs text-[#5E5A56] tabular-nums">
                       {formatDuration(track.durationMs)}
                     </span>
